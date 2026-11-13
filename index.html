@@ -116,6 +116,7 @@
   <button class="big primary hidden" id="btnResume">↻ Wznów sesję</button>
   <button class="big" id="goCoach">Jestem trenerem</button>
   <button class="big" id="goAthlete">Jestem zawodnikiem</button>
+  <a class="big android-only hidden" id="getApp" style="text-decoration:none;color:inherit" href="https://github.com/marurbanowicz-droid/Video-i-rozmowa/releases/latest">📲 Pobierz aplikację na Androida</a>
   <span class="ver" id="homeVer"></span>
 </section>
 
@@ -127,6 +128,7 @@
   <label class="lbl" for="joinCode">Kod pokoju (od trenera)</label>
   <input type="text" id="joinCode" class="code" maxlength="8" placeholder="ABCD">
   <button class="big primary" id="joinBtn">Połącz z trenerem</button>
+  <a class="big android-only hidden" id="openInApp" style="text-decoration:none;color:inherit">📲 Otwórz w aplikacji</a>
   <button class="big" id="joinBack">Wróć</button>
 </section>
 
@@ -135,6 +137,7 @@
   <h1 id="athRoomName">Pokój</h1>
   <div class="status"><span class="dot" id="athDot"></span><span id="athStatus">Łączenie…</span></div>
   <div class="roster" id="athRoster"></div>
+  <p class="muted-txt" id="athCrossInfo"></p>
   <div class="meter"><i id="athMeter"></i></div>
   <button class="big primary" id="athMute">🎙 Mikrofon włączony</button>
   <button class="big hidden" id="athUnlock">🔊 Dotknij, aby włączyć dźwięk</button>
@@ -215,7 +218,7 @@
     <label class="opt"><input type="checkbox" id="optNoise"><span>Redukcja szumów (systemowa)<small class="coach-only">Działa też na nagraniu i może przytłumić sygnał startu.</small></span></label>
     <label class="opt"><input type="checkbox" id="optWind"><span>Filtr wiatru w rozmowie<small>Wycina niskie dudnienie wiatru i silnika. <span class="coach-only">Nagranie zostaje bez filtra.</span></small></span></label>
     <label class="opt coach-only"><input type="checkbox" id="optIncAth"><span>Nagrywaj głosy zawodników</span></label>
-    <label class="opt coach-only"><input type="checkbox" id="optCross"><span>Zawodnicy słyszą się nawzajem<small>Wyłączone: słyszą tylko trenera.</small></span></label>
+    <label class="opt coach-only"><input type="checkbox" id="optCross"><span>Zawodnicy słyszą się nawzajem<small>Każdy zawodnik łączy się z każdym (strona i aplikacja). Wyłączone: słyszą tylko trenera.</small></span></label>
   </div>
 
   <div>
@@ -265,7 +268,7 @@
 <script>
 'use strict';
 /* ================= WERSJA I KONFIGURACJA ================= */
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const CONFIG = {
   peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
@@ -305,7 +308,7 @@ const sanitizeCode = s => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slic
 
 /* ---------- ustawienia ---------- */
 const DEFAULTS = {
-  incAth: true, crosstalk: false, coachNoise: false, coachWind: true, athNoise: true, athWind: true,
+  incAth: true, crosstalk: true, coachNoise: false, coachWind: true, athNoise: true, athWind: true,
   quality: '1080p30', kbps: 32, camId: null,
   stab: false, stabStr: 1.0, stabSm: 0.6, stabDl: 0, stabInvX: false, stabInvY: false, stabRoll: true,
   nSound: true, nText: true, nVoice: false
@@ -315,6 +318,7 @@ if (LS.get('incAth', null) !== null) { S.incAth = LS.get('incAth'); LS.del('incA
 if (LS.get('crosstalk', null) !== null) { S.crosstalk = LS.get('crosstalk'); LS.del('crosstalk'); }
 if (LS.get('camId', null) !== null) { S.camId = LS.get('camId'); LS.del('camId'); }
 const saveS = () => LS.set('settings', S);
+if (LS.get('settingsVer', 1) < 2) { S.crosstalk = true; LS.set('settingsVer', 2); }   // 2.1: zawodnicy słyszą się domyślnie
 saveS();
 
 /* ---------- pokoje (zapisane na stałe) ---------- */
@@ -364,6 +368,7 @@ document.addEventListener('visibilitychange', () => {
 function unlockAudio() {
   for (const c of [coach.ctx, ath.ctx]) if (c && c.state !== 'running') c.resume().catch(() => {});
   for (const a of coach.athletes.values()) if (a.audioEl && a.audioEl.paused) a.audioEl.play().catch(() => {});
+  for (const m of ath.mesh.values()) if (m.audio && m.audio.paused) m.audio.play().catch(() => {});
   const au = $('#athAudio'); if (ath.active && au.srcObject && au.paused) au.play().then(() => $('#athUnlock').classList.add('hidden')).catch(() => {});
 }
 document.addEventListener('pointerdown', unlockAudio, { capture: true });
@@ -431,7 +436,7 @@ function renderData() {
 }
 setInterval(async () => {
   if (!sessionActive()) return;
-  const objs = coach.active ? [...coach.athletes.values()].flatMap(a => [a.call]).concat([...coach.conns.values()]) : [ath.call, ath.conn];
+  const objs = coach.active ? [...coach.athletes.values()].flatMap(a => [a.call]).concat([...coach.conns.values()]) : [ath.call, ath.conn, ...[...ath.mesh.values()].map(m => m.call)];
   await Stats.poll(objs.filter(Boolean)); renderData();
 }, 2000);
 
@@ -468,7 +473,17 @@ function doUpdate() {
 $('#btnCheckUpd').onclick = () => checkUpdate(true);
 $('#btnDoUpd').onclick = doUpdate;
 $('#btnUpdBadge').onclick = () => openSettings();
-$('#verTxt').textContent = APP_VERSION; $('#homeVer').textContent = 'wersja ' + APP_VERSION;
+$('#verTxt').textContent = APP_VERSION;
+/* ---------- Android: aplikacja natywna ---------- */
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const RELEASES = 'https://github.com/marurbanowicz-droid/Video-i-rozmowa/releases/latest';
+if (IS_ANDROID) document.querySelectorAll('.android-only').forEach(e => e.classList.remove('hidden'));
+function updOpenInApp() {
+  const code = sanitizeCode($('#joinCode').value);
+  let q = 'pokoj=' + encodeURIComponent(code); if (LS.get('turnUrl', '')) q += '&turn=' + encodeURIComponent(LS.get('turnUrl', ''));
+  $('#openInApp').href = `intent://join?${q}#Intent;scheme=trenernawodzie;package=pl.trener.nawodzie;S.browser_fallback_url=${encodeURIComponent(RELEASES)};end`;
+}
+$('#joinCode').addEventListener('input', updOpenInApp); $('#homeVer').textContent = 'wersja ' + APP_VERSION;
 
 /* ================= EKRAN STARTOWY ================= */
 $('#goCoach').onclick = () => startCoach();
@@ -477,7 +492,7 @@ $('#joinBack').onclick = () => show('home');
 function openJoin(code) {
   $('#joinName').value = LS.get('athName', '');
   $('#joinCode').value = code || LS.get('lastRoom', '');
-  show('join');
+  show('join'); if (typeof updOpenInApp === 'function') updOpenInApp();
   ($('#joinName').value ? $('#joinCode') : $('#joinName')).focus();
 }
 $('#joinBtn').onclick = () => {
@@ -742,7 +757,7 @@ $('#btnRoomDel').onclick = () => {
 
 /* ---------- zawodnicy po stronie trenera ---------- */
 function rosterMsg() {
-  return { t: 'roster', room: room().name, code: room().code, list: [...coach.athletes.values()].map(a => ({ id: a.cid, name: a.name, on: a.status === 'online' })) };
+  return { t: 'roster', room: room().name, code: room().code, cross: !!S.crosstalk, list: [...coach.athletes.values()].map(a => ({ id: a.cid, name: a.name, on: a.status === 'online', pid: a.pid || '' })) };
 }
 function broadcast(msg) { for (const c of coach.conns.values()) if (c.open) try { c.send(msg); } catch {} }
 function broadcastRoster() { if (coach.active) broadcast(rosterMsg()); }
@@ -774,7 +789,7 @@ function onAthleteCall(call) {
   const dest = ctx.createMediaStreamDestination(); dest.channelCount = 1;
   coach.sendGain.connect(dest);
   for (const o of coach.athletes.values()) if (o !== a && o.relay) o.relay.connect(dest);
-  a.call = call; a.dest = dest; a.since = Date.now(); a.badSince = 0;
+  a.call = call; a.pid = call.peer; a.dest = dest; a.since = Date.now(); a.badSince = 0;
   call.answer(dest.stream);
   call.on('stream', remote => attachAthleteStream(a, call, remote));
   call.on('close', () => { if (a.call === call) goOffline(a); });
@@ -855,7 +870,7 @@ function updAthCount() {
 function updateGains() {
   for (const a of coach.athletes.values()) {
     if (a.recGain) a.recGain.gain.value = (S.incAth && !a.muted) ? 1 : 0;
-    if (a.relay) a.relay.gain.value = S.crosstalk ? 1 : 0;
+    if (a.relay) a.relay.gain.value = 0;   // zawodnicy łączą się bezpośrednio (mesh)
   }
 }
 $('#btnMic').onclick = () => {
@@ -990,7 +1005,7 @@ $('#optNoise').onchange = async e => {
 };
 $('#optWind').onchange = e => { if (coach.active) S.coachWind = e.target.checked; else S.athWind = e.target.checked; saveS(); applyWind(); };
 $('#optIncAth').onchange = e => { S.incAth = e.target.checked; saveS(); updateGains(); };
-$('#optCross').onchange = e => { S.crosstalk = e.target.checked; saveS(); updateGains(); };
+$('#optCross').onchange = e => { S.crosstalk = e.target.checked; saveS(); updateGains(); broadcastRoster(); };
 $('#optStab').onchange = e => { if (coach.rec) { e.target.checked = S.stab; return toast('Nie można przełączać stabilizacji podczas nagrywania'); } S.stab = e.target.checked; saveS(); applyStab(); };
 $('#stabStr').oninput = e => { S.stabStr = +e.target.value; saveS(); updStabLbls(); };
 $('#stabSm').oninput = e => { S.stabSm = +e.target.value; saveS(); updStabLbls(); };
@@ -1016,7 +1031,7 @@ $('#btnEnd').onclick = () => {
 const ath = {
   active: false, peer: null, call: null, conn: null, code: null, name: null, ice: [], badSince: 0, watch: null,
   ctx: null, micStream: null, micSrc: null, micBus: null, hp: null, muteGain: null, sendDest: null,
-  muted: false, link: false, everLinked: false, roster: null, roomName: '', kbps: 32, connT: 0,
+  muted: false, link: false, everLinked: false, roster: null, roomName: '', kbps: 32, connT: 0, cross: false, mesh: new Map(),
   cid: LS.get('cid', null) || genCode(10)
 };
 LS.set('cid', ath.cid);
@@ -1060,15 +1075,20 @@ const coachId = () => CONFIG.peerPrefix + ath.code;
 function athConnectPeer() {
   const p = ath.peer = new Peer(undefined, { config: { iceServers: ath.ice }, debug: 1 });
   p.on('open', () => { athCall(); athConnectData(); });
+  p.on('call', onMeshCall);
   p.on('error', e => {
     console.warn('peer', e.type, e);
-    if (e.type === 'peer-unavailable') { ath.call = null; ath.conn = null; if (!ath.link) setAth('wait', 'Trener jeszcze nie jest online – czekam…'); }
+    if (e.type === 'peer-unavailable') {
+      const msg = String(e.message || '');
+      if (msg && !msg.includes(coachId())) { for (const [cid, m] of [...ath.mesh]) if (msg.includes(m.pid)) closeMesh(cid); return; }
+      ath.call = null; ath.conn = null; if (!ath.link) setAth('wait', 'Trener jeszcze nie jest online – czekam…');
+    }
   });
 }
 function athConnectData() {
   const p = ath.peer; if (!p || !p.open || p.disconnected) return;
   if (ath.conn) try { ath.conn.close(); } catch {}
-  const c = ath.conn = p.connect(coachId(), { reliable: true, metadata: { cid: ath.cid, name: ath.name } });
+  const c = ath.conn = p.connect(coachId(), { reliable: true, serialization: 'json', metadata: { cid: ath.cid, name: ath.name } });
   ath.connT = Date.now();
   c.on('data', onCoachData);
   c.on('close', () => { if (ath.conn === c) ath.conn = null; });
@@ -1076,9 +1096,9 @@ function athConnectData() {
 }
 function onCoachData(d) {
   if (!d || typeof d !== 'object') return;
-  if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); }
+  if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); for (const m of ath.mesh.values()) applyBitrate(m.call.peerConnection, ath.kbps); }
   if (d.t === 'roster') {
-    ath.roomName = d.room || ''; $('#athRoomName').textContent = (ath.roomName || 'Pokój') + ' · ' + ath.code;
+    ath.roomName = d.room || ''; ath.cross = !!d.cross; $('#athRoomName').textContent = (ath.roomName || 'Pokój') + ' · ' + ath.code;
     const next = new Map(d.list.map(x => [x.id, x]));
     if (ath.roster) {
       for (const [id, x] of next) {
@@ -1089,14 +1109,66 @@ function onCoachData(d) {
       }
       for (const [id, x] of ath.roster) if (!next.has(id) && x.on && id !== ath.cid) Notif.event('leave', `${x.name} rozłącza się`);
     }
-    ath.roster = next; renderAthRoster();
+    ath.roster = next; renderAthRoster(); updateMesh();
   }
+}
+
+/* ---------- zawodnik ↔ zawodnik (każdy z każdym) ---------- */
+function meshIsUp(m) { const st = m.call.peerConnection && m.call.peerConnection.iceConnectionState; return st === 'connected' || st === 'completed'; }
+function setupMesh(cid, call) {
+  const m = { call, audio: null, t: Date.now(), pid: call.peer };
+  ath.mesh.set(cid, m);
+  call.on('stream', s => {
+    if (ath.mesh.get(cid) !== m || m.audio) return;
+    const au = new Audio(); au.autoplay = true; au.playsInline = true; au.srcObject = s; au.play().catch(() => {}); m.audio = au;
+    setTimeout(() => { applyBitrate(call.peerConnection, ath.kbps); renderAthRoster(); }, 800);
+  });
+  call.on('close', () => { if (ath.mesh.get(cid) === m) closeMesh(cid); });
+  call.on('error', () => { if (ath.mesh.get(cid) === m) closeMesh(cid); });
+}
+function closeMesh(cid) {
+  const m = ath.mesh.get(cid); if (!m) return;
+  ath.mesh.delete(cid);
+  try { m.call.close(); } catch {}
+  if (m.audio) { m.audio.pause(); m.audio.srcObject = null; }
+  renderAthRoster();
+}
+function onMeshCall(call) {
+  const md = call.metadata || {};
+  if (!md.mesh || !md.cid || !ath.cross) { try { call.close(); } catch {} return; }
+  if (ath.mesh.has(md.cid)) closeMesh(md.cid);
+  call.answer(ath.sendDest.stream);
+  setupMesh(md.cid, call);
+}
+function updateMesh() {
+  if (!ath.active) return;
+  const want = ath.cross && ath.roster ? [...ath.roster.values()].filter(x => x.on && x.id !== ath.cid && x.pid) : [];
+  const ids = new Set(want.map(x => x.id));
+  for (const [cid, m] of [...ath.mesh]) {
+    const st = m.call.peerConnection && m.call.peerConnection.iceConnectionState;
+    if (!ids.has(cid) || st === 'failed' || st === 'closed' || (!meshIsUp(m) && Date.now() - m.t > 20000)) closeMesh(cid);
+  }
+  const p = ath.peer; if (!p || !p.open || p.disconnected) return;
+  for (const x of want) {
+    const m = ath.mesh.get(x.id);
+    if (m && m.pid === x.pid) continue;
+    if (m && ath.cid < x.id) closeMesh(x.id);
+    if (ath.cid < x.id && !ath.mesh.has(x.id)) {
+      const c = p.call(x.pid, ath.sendDest.stream, { metadata: { name: ath.name, cid: ath.cid, mesh: true } });
+      if (c) setupMesh(x.id, c);
+    }
+  }
+  renderAthRoster();
 }
 function renderAthRoster() {
   const box = $('#athRoster'); box.innerHTML = '';
   const add = (name, on) => { const s = document.createElement('span'); s.className = on ? '' : 'off'; s.innerHTML = `<i class="dot ${on ? 'ok' : 'err'}"></i>`; s.append(name); box.appendChild(s); };
   add('Trener', ath.link);
-  if (ath.roster) for (const [id, x] of ath.roster) add(id === ath.cid ? x.name + ' (Ty)' : x.name, x.on);
+  if (ath.roster) for (const [id, x] of ath.roster) {
+    const m = ath.mesh.get(id);
+    add(id === ath.cid ? x.name + ' (Ty)' : x.name + (ath.cross && m && meshIsUp(m) ? ' 🔊' : ''), x.on);
+  }
+  $('#athCrossInfo').textContent = ath.cross ? '🔊 Słyszycie się nawzajem – ikona przy imieniu oznacza aktywne połączenie.' : 'Słyszysz tylko trenera.';
 }
 function setLink(up) {
   if (up === ath.link) return;
@@ -1124,6 +1196,7 @@ function athCall() {
 }
 function athWatchdog(force) {
   if (!ath.active) return;
+  updateMesh();
   if (ath.ctx && ath.ctx.state !== 'running') ath.ctx.resume().catch(() => {});
   const p = ath.peer;
   if (!p || p.destroyed) return athConnectPeer();
@@ -1148,6 +1221,7 @@ $('#athUnlock').onclick = () => $('#athAudio').play().then(() => $('#athUnlock')
 $('#athLeave').onclick = () => {
   if (!confirm('Rozłączyć się z trenerem?')) return;
   try { ath.conn && ath.conn.open && ath.conn.send({ t: 'bye' }); } catch {}
+  for (const cid of [...ath.mesh.keys()]) closeMesh(cid);
   ath.active = false; clearInterval(ath.watch); LS.del('session'); window.__leaving = true;
   setTimeout(() => {
     try { ath.call?.close(); } catch {} try { ath.peer?.destroy(); } catch {}
