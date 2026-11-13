@@ -47,6 +47,7 @@ object CamRec {
 
     private var pcm: PcmWriter? = null
     private var pendingRebind = false
+    private var lastZoomKey = ""
 
     fun bind(ctx: Context, lifecycleOwner: LifecycleOwner) {
         owner = lifecycleOwner
@@ -94,6 +95,11 @@ object CamRec {
             stabSupported = prevStabOk || vidStabOk
             stabActive = want && stabSupported
             camera = p.bindToLifecycle(o, sel, pv, vc)
+            lastZoomKey = ""
+            camera?.cameraInfo?.zoomState?.observe(o) { zs ->
+                val k = "${zs.minZoomRatio}-${zs.maxZoomRatio}"
+                if (k != lastZoomKey) { lastZoomKey = k; notifyChange() }
+            }
             preview = pv; videoCapture = vc
         } catch (e: Exception) {
             Log.e(TAG, "bind", e); Notifier.toast("Błąd kamery: ${e.message}")
