@@ -4,11 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b2239">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Trener na wodzie</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
 <style>
-  :root{--bg:#0b2239;--card:#12304f;--acc:#2ec4b6;--red:#e63946;--txt:#f1f5f9;--mut:#94a3b8;--warn:#f4a261}
+  :root{--bg:#0b2239;--card:#12304f;--card2:#0e2a47;--acc:#2ec4b6;--red:#e63946;--txt:#f1f5f9;--mut:#94a3b8;--warn:#f4a261;--ok:#22c55e}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   button{font:inherit;color:inherit;border:0;cursor:pointer}
@@ -16,39 +19,49 @@
   .screen.active{display:flex}
   .hidden{display:none!important}
 
-  /* start / dołączanie / zawodnik */
-  .center{flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center}
-  .center h1{margin:0 0 8px;font-size:1.7rem}
+  .center{flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+  .center h1{margin:0 0 6px;font-size:1.6rem}
   .center p{color:var(--mut);margin:0;max-width:420px;line-height:1.45}
-  .big{width:100%;max-width:380px;padding:20px;border-radius:16px;background:var(--card);font-size:1.25rem;font-weight:600}
+  .big{width:100%;max-width:380px;padding:18px;border-radius:16px;background:var(--card);font-size:1.2rem;font-weight:600}
   .big.primary{background:var(--acc);color:#04211f}
   .big.danger{background:#3b1d27;color:#ffb4bb}
-  input[type=text],input[type=url]{width:100%;max-width:380px;padding:16px;border-radius:12px;border:2px solid #24476e;background:#0e2a47;color:var(--txt);font-size:1.15rem}
+  input[type=text],input[type=url]{width:100%;max-width:380px;padding:15px;border-radius:12px;border:2px solid #24476e;background:var(--card2);color:var(--txt);font-size:1.1rem}
   input.code{text-transform:uppercase;letter-spacing:.3em;text-align:center;font-weight:700}
-  label.lbl{width:100%;max-width:380px;text-align:left;color:var(--mut);font-size:.9rem;margin-bottom:-10px}
+  label.lbl{width:100%;max-width:380px;text-align:left;color:var(--mut);font-size:.9rem;margin-bottom:-8px}
+  .ver{color:#5b7391;font-size:.8rem}
 
-  .status{padding:22px;border-radius:18px;background:var(--card);width:100%;max-width:380px;font-size:1.25rem;font-weight:600;display:flex;align-items:center;gap:12px;justify-content:center}
+  .status{padding:20px;border-radius:18px;background:var(--card);width:100%;max-width:380px;font-size:1.2rem;font-weight:600;display:flex;align-items:center;gap:12px;justify-content:center}
   .dot{width:14px;height:14px;border-radius:50%;background:var(--warn);flex:none;box-shadow:0 0 0 4px #0003}
-  .dot.ok{background:#22c55e}.dot.err{background:var(--red)}
-  .meter{width:100%;max-width:380px;height:12px;border-radius:6px;background:#0e2a47;overflow:hidden}
+  .dot.ok{background:var(--ok)}.dot.err{background:var(--red)}
+  .meter{width:100%;max-width:380px;height:10px;border-radius:5px;background:var(--card2);overflow:hidden}
   .meter i{display:block;height:100%;background:var(--acc);transform-origin:left;transform:scaleX(0);transition:transform .08s}
+  .roster{width:100%;max-width:380px;display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+  .roster span{background:var(--card);border-radius:999px;padding:6px 12px;font-size:.9rem;display:flex;align-items:center;gap:6px}
+  .roster span .dot{width:9px;height:9px;box-shadow:none}
+  .roster span.off{opacity:.55}
+  .row2{display:flex;gap:10px;width:100%;max-width:380px}
+  .row2 .big{flex:1}
 
   /* trener */
   #coach{position:fixed;inset:0;background:#000}
-  #preview{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-  .topbar{position:absolute;top:0;left:0;right:0;display:flex;gap:8px;align-items:center;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;background:linear-gradient(#000a,#0000)}
-  .pill{background:#0009;border-radius:999px;padding:9px 14px;display:flex;align-items:center;gap:8px;font-weight:600}
-  .pill b{letter-spacing:.15em}
+  #preview,#stabCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+  #preview.ghost{opacity:0}
+  .topbar{position:absolute;top:0;left:0;right:0;display:flex;gap:6px;align-items:center;padding:calc(env(safe-area-inset-top) + 8px) 8px 8px;background:linear-gradient(#000a,#0000);flex-wrap:wrap}
+  .pill{background:#0009;border-radius:999px;padding:8px 12px;display:flex;align-items:center;gap:7px;font-weight:600;font-size:.92rem;max-width:46vw;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .pill b{letter-spacing:.12em}
   .sp{flex:1}
-  .ibtn{background:#0009;border-radius:999px;padding:10px 14px;font-weight:600}
+  .ibtn{background:#0009;border-radius:999px;padding:9px 13px;font-weight:600}
+  .ibtn.upd{background:var(--warn);color:#2b1600}
   .recinfo{position:absolute;top:calc(env(safe-area-inset-top) + 62px);left:50%;transform:translateX(-50%);background:var(--red);padding:6px 14px;border-radius:999px;font-weight:700;font-variant-numeric:tabular-nums}
-  .athletes{position:absolute;left:8px;top:calc(env(safe-area-inset-top) + 60px);display:flex;flex-direction:column;gap:6px;max-height:55%;overflow:auto}
+  .athletes{position:absolute;left:8px;top:calc(env(safe-area-inset-top) + 60px);display:flex;flex-direction:column;gap:6px;max-height:52%;overflow:auto}
   .ath{background:#000a;border-radius:12px;padding:6px 10px;min-width:120px;font-size:.9rem;display:flex;flex-direction:column;gap:4px;text-align:left}
   .ath .row{display:flex;align-items:center;gap:6px}
   .ath .dot{width:9px;height:9px;box-shadow:none}
   .ath .lvl{height:4px;border-radius:2px;background:#ffffff22;overflow:hidden}
   .ath .lvl i{display:block;height:100%;background:var(--acc);transform-origin:left;transform:scaleX(0)}
-  .ath.muted{opacity:.5}.ath.muted .nm::after{content:" 🔇"}
+  .ath.muted .nm::after{content:" 🔇"}
+  .ath.offline{opacity:.55}
+  .ath.offline .nm::after{content:" – ponawianie…";font-size:.75rem;color:#ffb4bb}
   .bottom{position:absolute;left:0;right:0;bottom:0;padding:10px 16px calc(env(safe-area-inset-bottom) + 14px);background:linear-gradient(#0000,#000b)}
   .zoomrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
   .zoomrow input{flex:1;accent-color:var(--acc);height:32px}
@@ -56,6 +69,7 @@
   .ctrls{display:flex;align-items:center;justify-content:space-around}
   .round{width:64px;height:64px;border-radius:50%;background:#ffffff26;font-size:1.6rem;position:relative;overflow:hidden}
   .round.off{background:var(--red)}
+  .round.on{background:var(--acc)}
   .round .mm{position:absolute;left:0;bottom:0;height:5px;width:100%;background:var(--acc);transform-origin:left;transform:scaleX(0)}
   .recbtn{width:84px;height:84px;border-radius:50%;background:transparent;border:5px solid #fff;display:grid;place-items:center}
   .recbtn::after{content:"";width:62px;height:62px;border-radius:50%;background:var(--red);transition:all .2s}
@@ -63,24 +77,34 @@
 
   /* panele */
   .sheet{position:fixed;inset:0;background:#000a;display:flex;align-items:flex-end;justify-content:center;z-index:10}
-  .sheet .box{background:var(--bg);width:100%;max-width:560px;max-height:88%;overflow:auto;border-radius:20px 20px 0 0;padding:20px 18px calc(env(safe-area-inset-bottom) + 20px);display:flex;flex-direction:column;gap:14px}
+  .sheet .box{background:var(--bg);width:100%;max-width:560px;max-height:90%;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom) + 20px);display:flex;flex-direction:column;gap:12px}
   .sheet h2{margin:0;font-size:1.25rem;display:flex;justify-content:space-between;align-items:center}
-  .sheet .x{background:var(--card);border-radius:50%;width:40px;height:40px}
+  .sheet h3{margin:10px 0 0;font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--acc)}
+  .sheet .x{background:var(--card);border-radius:50%;width:40px;height:40px;flex:none}
   .qr{background:#fff;border-radius:14px;padding:10px;width:min(70vw,280px);align-self:center}
   .qr svg{width:100%;height:auto;display:block}
-  .link{word-break:break-all;color:var(--mut);font-size:.85rem;background:#0e2a47;padding:10px;border-radius:10px}
-  .btnrow{display:flex;gap:10px}
-  .btnrow button{flex:1;padding:14px;border-radius:12px;background:var(--card);font-weight:600}
+  .link{word-break:break-all;color:var(--mut);font-size:.85rem;background:var(--card2);padding:10px;border-radius:10px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+  .btnrow button{flex:1;padding:13px;border-radius:12px;background:var(--card);font-weight:600;min-width:30%}
   .btnrow button.primary{background:var(--acc);color:#04211f}
-  .opt{display:flex;align-items:center;gap:12px;background:var(--card);padding:14px;border-radius:12px}
-  .opt input[type=checkbox]{width:24px;height:24px;accent-color:var(--acc)}
-  .opt small{display:block;color:var(--mut)}
-  select{width:100%;padding:14px;border-radius:12px;background:#0e2a47;color:var(--txt);border:2px solid #24476e;font-size:1rem}
+  .opt{display:flex;align-items:center;gap:12px;background:var(--card);padding:13px;border-radius:12px}
+  .opt input[type=checkbox]{width:24px;height:24px;accent-color:var(--acc);flex:none}
+  .opt small{display:block;color:var(--mut);margin-top:2px}
+  .rng{background:var(--card);padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:6px}
+  .rng div{display:flex;justify-content:space-between}
+  .rng input{accent-color:var(--acc);width:100%}
+  select{width:100%;padding:13px;border-radius:12px;background:var(--card2);color:var(--txt);border:2px solid #24476e;font-size:1rem}
+  .sheet input[type=text],.sheet input[type=url]{max-width:none}
+  details{background:var(--card2);border-radius:12px;padding:10px}
+  details summary{cursor:pointer;color:var(--mut);font-weight:600}
+  details[open]{display:flex;flex-direction:column;gap:10px}
   .file{background:var(--card);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
   .file .meta{color:var(--mut);font-size:.85rem}
-  .file .btnrow button{padding:10px;background:#0e2a47}
-  .muted-txt{color:var(--mut);font-size:.85rem;line-height:1.4}
-  #toast{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);background:#000d;padding:10px 16px;border-radius:10px;z-index:20;max-width:90%;text-align:center}
+  .file .btnrow button{padding:10px;background:var(--card2)}
+  .muted-txt{color:var(--mut);font-size:.85rem;line-height:1.4;margin:0}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.9rem;background:var(--card);padding:12px;border-radius:12px}
+  .kv span:nth-child(odd){color:var(--mut)}
+  #toast{position:fixed;left:50%;bottom:160px;transform:translateX(-50%);background:#000e;padding:10px 16px;border-radius:10px;z-index:20;max-width:90%;text-align:center;font-weight:600}
 </style>
 </head>
 <body>
@@ -89,40 +113,47 @@
 <section id="home" class="screen center active">
   <h1>⛵ Trener na wodzie</h1>
   <p>Rozmowa z zawodnikami i nagrywanie wideo z dźwiękiem jednocześnie.</p>
-  <button class="big primary" id="goCoach">Jestem trenerem</button>
+  <button class="big primary hidden" id="btnResume">↻ Wznów sesję</button>
+  <button class="big" id="goCoach">Jestem trenerem</button>
   <button class="big" id="goAthlete">Jestem zawodnikiem</button>
+  <span class="ver" id="homeVer"></span>
 </section>
 
-<!-- DOŁĄCZ (zawodnik) -->
+<!-- DOŁĄCZ -->
 <section id="join" class="screen center">
   <h1>Dołącz do treningu</h1>
   <label class="lbl" for="joinName">Twoje imię</label>
   <input type="text" id="joinName" autocomplete="given-name" placeholder="np. Ola">
   <label class="lbl" for="joinCode">Kod pokoju (od trenera)</label>
-  <input type="text" id="joinCode" class="code" maxlength="8" placeholder="ABCDE">
+  <input type="text" id="joinCode" class="code" maxlength="8" placeholder="ABCD">
   <button class="big primary" id="joinBtn">Połącz z trenerem</button>
   <button class="big" id="joinBack">Wróć</button>
 </section>
 
 <!-- ZAWODNIK -->
 <section id="athlete" class="screen center">
-  <h1>Pokój <span id="athRoom"></span></h1>
+  <h1 id="athRoomName">Pokój</h1>
   <div class="status"><span class="dot" id="athDot"></span><span id="athStatus">Łączenie…</span></div>
+  <div class="roster" id="athRoster"></div>
   <div class="meter"><i id="athMeter"></i></div>
   <button class="big primary" id="athMute">🎙 Mikrofon włączony</button>
   <button class="big hidden" id="athUnlock">🔊 Dotknij, aby włączyć dźwięk</button>
-  <button class="big danger" id="athLeave">Rozłącz</button>
-  <p>Nie blokuj ekranu. Na iPhonie zablokowanie ekranu przerywa rozmowę. Możesz przyciemnić jasność.</p>
+  <div class="row2"><button class="big" id="athSettings">⚙ Ustawienia</button><button class="big danger" id="athLeave">Rozłącz</button></div>
+  <p class="muted-txt" id="athData">Dane: 0 MB</p>
+  <p>Nie blokuj ekranu: na iPhonie zablokowanie ekranu przerywa rozmowę. Możesz przyciemnić jasność.</p>
   <audio id="athAudio" autoplay playsinline></audio>
 </section>
 
 <!-- TRENER -->
 <section id="coach" class="screen">
   <video id="preview" autoplay muted playsinline></video>
+  <canvas id="stabCanvas" class="hidden"></canvas>
   <div class="topbar">
-    <div class="pill"><span class="dot" id="peerDot"></span>Pokój <b id="roomCode"></b></div>
+    <div class="pill"><span class="dot" id="peerDot"></span><span id="roomPill"></span></div>
     <div class="pill" id="athCount">👥 0</div>
+    <div class="pill" id="dataPill">⇅ 0 MB</div>
     <div class="sp"></div>
+    <button class="ibtn upd hidden" id="btnUpdBadge">⬆</button>
     <button class="ibtn" id="btnInvite">Zaproś</button>
     <button class="ibtn" id="btnSettings">⚙</button>
   </div>
@@ -132,6 +163,7 @@
     <div class="zoomrow hidden" id="zoomBox">🔍<input type="range" id="zoom"><span id="zoomLbl">1.0×</span></div>
     <div class="ctrls">
       <button class="round" id="btnMic" title="Mikrofon do zawodników">🎙<i class="mm" id="micMeter"></i></button>
+      <button class="round" id="btnStab" title="Stabilizacja">🎯</button>
       <button class="recbtn" id="btnRec" aria-label="Nagrywanie"></button>
       <button class="round" id="btnFiles" title="Nagrania">📁</button>
     </div>
@@ -140,8 +172,8 @@
 
 <!-- PANEL: ZAPROSZENIE -->
 <div class="sheet hidden" id="sheetInvite"><div class="box">
-  <h2>Zaproś zawodników <button class="x" data-close>✕</button></h2>
-  <p class="muted-txt">Zawodnicy skanują kod albo otwierają link i wpisują imię. Kod pokoju jest stały, więc link działa na kolejnych treningach.</p>
+  <h2><span id="invTitle">Zaproś zawodników</span> <button class="x" data-close>✕</button></h2>
+  <p class="muted-txt">Zawodnicy skanują kod albo otwierają link i wpisują imię. Pokój jest zapisany na stałe, więc link działa na każdym treningu.</p>
   <div class="qr" id="qrBox"></div>
   <div class="link" id="inviteLink"></div>
   <div class="btnrow"><button class="primary" id="btnShareLink">Udostępnij</button><button id="btnCopyLink">Kopiuj</button></div>
@@ -150,15 +182,75 @@
 <!-- PANEL: USTAWIENIA -->
 <div class="sheet hidden" id="sheetSettings"><div class="box">
   <h2>Ustawienia <button class="x" data-close>✕</button></h2>
-  <label class="muted-txt" for="camSel">Kamera (wybierz teleobiektyw, jeśli jest na liście)</label>
-  <select id="camSel"></select>
-  <label class="opt"><input type="checkbox" id="optIncAth"><span>Nagrywaj głosy zawodników<small>Na filmie będzie też to, co mówią zawodnicy.</small></span></label>
-  <label class="opt"><input type="checkbox" id="optCross"><span>Zawodnicy słyszą się nawzajem<small>Wyłączone: słyszą tylko trenera.</small></span></label>
-  <label class="muted-txt" for="turnUrl">Adres danych TURN (opcjonalnie, poprawia łączność w sieci komórkowej)</label>
-  <input type="url" id="turnUrl" placeholder="https://…metered.live/api/v1/turn/credentials?apiKey=…">
-  <div class="btnrow"><button id="btnSaveTurn">Zapisz TURN</button><button id="btnNewCode">Nowy kod pokoju</button></div>
-  <p class="muted-txt" id="techInfo"></p>
-  <button class="big danger" id="btnEnd" style="max-width:none">Zakończ sesję</button>
+
+  <div class="coach-only">
+    <h3>Pokój</h3>
+    <select id="roomSel"></select>
+    <label class="muted-txt" for="roomName">Nazwa pokoju (widzą ją zawodnicy)</label>
+    <input type="text" id="roomName" maxlength="40">
+    <div class="btnrow"><button id="btnRoomNew">＋ Nowy pokój</button><button id="btnRoomCode">Zmień kod</button><button id="btnRoomDel">Usuń</button></div>
+  </div>
+
+  <div class="coach-only">
+    <h3>Obraz</h3>
+    <label class="muted-txt" for="camSel">Kamera (teleobiektyw daje ostrzejszy obraz niż zoom cyfrowy)</label>
+    <select id="camSel"></select>
+    <label class="muted-txt" for="qualSel">Jakość nagrania</label>
+    <select id="qualSel"></select>
+    <label class="opt"><input type="checkbox" id="optStab"><span>Stabilizacja obrazu (żyroskop)<small>Wycina ok. 15% kadru. Działa na podglądzie i nagraniu.</small></span></label>
+    <details>
+      <summary>Kalibracja stabilizacji</summary>
+      <div class="rng"><div><span>Siła korekty</span><b id="vStr"></b></div><input type="range" id="stabStr" min="0" max="1.5" step="0.05"></div>
+      <div class="rng"><div><span>Wygładzanie ruchu kamery</span><b id="vSm"></b></div><input type="range" id="stabSm" min="0.15" max="2" step="0.05"></div>
+      <div class="rng"><div><span>Korekta opóźnienia</span><b id="vDl"></b></div><input type="range" id="stabDl" min="-100" max="150" step="5"></div>
+      <label class="opt"><input type="checkbox" id="stabInvX"><span>Odwróć poziomo</span></label>
+      <label class="opt"><input type="checkbox" id="stabInvY"><span>Odwróć pionowo</span></label>
+      <label class="opt"><input type="checkbox" id="stabRoll"><span>Koryguj przechył</span></label>
+      <p class="muted-txt">Jeśli obraz „ucieka” w złą stronę, włącz odwrócenie danej osi. Jeśli korekta się spóźnia, zwiększ opóźnienie. Jeśli przesadza, zmniejsz siłę.</p>
+    </details>
+  </div>
+
+  <div>
+    <h3>Dźwięk</h3>
+    <label class="opt"><input type="checkbox" id="optNoise"><span>Redukcja szumów (systemowa)<small class="coach-only">Działa też na nagraniu i może przytłumić sygnał startu.</small></span></label>
+    <label class="opt"><input type="checkbox" id="optWind"><span>Filtr wiatru w rozmowie<small>Wycina niskie dudnienie wiatru i silnika. <span class="coach-only">Nagranie zostaje bez filtra.</span></small></span></label>
+    <label class="opt coach-only"><input type="checkbox" id="optIncAth"><span>Nagrywaj głosy zawodników</span></label>
+    <label class="opt coach-only"><input type="checkbox" id="optCross"><span>Zawodnicy słyszą się nawzajem<small>Wyłączone: słyszą tylko trenera.</small></span></label>
+  </div>
+
+  <div>
+    <h3>Połączenie</h3>
+    <div class="coach-only">
+      <label class="muted-txt" for="kbpsSel">Jakość rozmowy (ustawiana dla wszystkich)</label>
+      <select id="kbpsSel">
+        <option value="16">Oszczędna – 16 kb/s (słaby zasięg)</option>
+        <option value="32">Standardowa – 32 kb/s</option>
+        <option value="64">Wysoka – 64 kb/s</option>
+      </select>
+    </div>
+    <div class="kv" id="dataKv"></div>
+    <div class="coach-only">
+      <label class="muted-txt" for="turnUrl">Adres danych TURN (opcjonalnie, poprawia łączność w sieci komórkowej)</label>
+      <input type="url" id="turnUrl" placeholder="https://…metered.live/api/v1/turn/credentials?apiKey=…">
+      <div class="btnrow" style="margin-top:8px"><button id="btnSaveTurn">Zapisz TURN</button></div>
+    </div>
+  </div>
+
+  <div>
+    <h3>Powiadomienia o dołączeniu i rozłączeniu</h3>
+    <label class="opt"><input type="checkbox" id="nSound"><span>Sygnał dźwiękowy</span></label>
+    <label class="opt"><input type="checkbox" id="nText"><span>Komunikat na ekranie</span></label>
+    <label class="opt"><input type="checkbox" id="nVoice"><span>Komunikat głosowy<small>Np. „Ola – utracono połączenie”.</small></span></label>
+  </div>
+
+  <div>
+    <h3>Aplikacja</h3>
+    <div class="kv"><span>Wersja</span><b id="verTxt"></b><span>Aktualizacja</span><span id="updInfo">—</span></div>
+    <div class="btnrow" style="margin-top:8px"><button id="btnCheckUpd">Sprawdź aktualizację</button><button class="primary hidden" id="btnDoUpd">Zaktualizuj</button></div>
+    <p class="muted-txt" style="margin-top:8px">Aktualizacja zachowuje pokoje, ustawienia i nagrania, a trwającą sesję wznawia automatycznie.</p>
+    <p class="muted-txt coach-only" id="techInfo" style="margin-top:6px"></p>
+  </div>
+  <button class="big danger coach-only" id="btnEnd" style="max-width:none">Zakończ sesję</button>
 </div></div>
 
 <!-- PANEL: NAGRANIA -->
@@ -172,36 +264,70 @@
 
 <script>
 'use strict';
-/* ================= KONFIGURACJA ================= */
+/* ================= WERSJA I KONFIGURACJA ================= */
+const APP_VERSION = '2.0.0';
 const CONFIG = {
-  peerPrefix: 'trener-na-wodzie-v1-',          // prefiks identyfikatorów (nie zmieniaj po rozesłaniu linków)
+  peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
   ],
-  // Opcjonalnie: adres API, które zwraca listę serwerów TURN (np. Metered.ca – darmowy plan).
-  // Można też wpisać go w Ustawieniach aplikacji – zostanie dołączony do linku dla zawodników.
-  turnCredentialsUrl: '',
-  videoBitrate: 8_000_000,                      // ~8 Mb/s ≈ 60 MB na minutę
-  audioBitrate: 128_000
+  turnCredentialsUrl: '',                       // opcjonalnie, można też wpisać w Ustawieniach
+  audioRecBitrate: 128_000,
+  cameraDfovDeg: 84                             // kąt widzenia (przekątna) obiektywu głównego ~24 mm
+};
+const QUALITY = {
+  '720p30':  { w: 1280, h: 720,  fps: 30, br: 5_000_000,  label: '720p 30 kl/s (~38 MB/min)' },
+  '1080p30': { w: 1920, h: 1080, fps: 30, br: 10_000_000, label: '1080p 30 kl/s (~75 MB/min)' },
+  '1080p60': { w: 1920, h: 1080, fps: 60, br: 16_000_000, label: '1080p 60 kl/s (~120 MB/min)' },
+  '2160p30': { w: 3840, h: 2160, fps: 30, br: 35_000_000, label: '4K 30 kl/s (~260 MB/min, jeśli kamera pozwala)' }
 };
 
 /* ================= NARZĘDZIA ================= */
 const $ = s => document.querySelector(s);
 const ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const genCode = (n = 5) => Array.from(crypto.getRandomValues(new Uint32Array(n)), x => ALPH[x % ALPH.length]).join('');
+const genCode = (n = 4) => Array.from(crypto.getRandomValues(new Uint32Array(n)), x => ALPH[x % ALPH.length]).join('');
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} }
 };
 function show(id) { document.querySelectorAll('.screen').forEach(e => e.classList.toggle('active', e.id === id)); }
 let toastT;
-function toast(msg, ms = 2800) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms); }
+function toast(msg, ms = 3000) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms); }
 const pad = n => String(n).padStart(2, '0');
 function stamp() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`; }
-const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
+function fmtB(b) { return b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB'; }
+function cmpVer(a, b) { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; }
 function openSheet(id) { $(id).classList.remove('hidden'); }
 document.querySelectorAll('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s || e.target.hasAttribute('data-close')) s.classList.add('hidden'); }));
+const sanitizeCode = s => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+
+/* ---------- ustawienia ---------- */
+const DEFAULTS = {
+  incAth: true, crosstalk: false, coachNoise: false, coachWind: true, athNoise: true, athWind: true,
+  quality: '1080p30', kbps: 32, camId: null,
+  stab: false, stabStr: 1.0, stabSm: 0.6, stabDl: 0, stabInvX: false, stabInvY: false, stabRoll: true,
+  nSound: true, nText: true, nVoice: false
+};
+const S = Object.assign({}, DEFAULTS, LS.get('settings', {}));
+if (LS.get('incAth', null) !== null) { S.incAth = LS.get('incAth'); LS.del('incAth'); }        // migracja z 1.x
+if (LS.get('crosstalk', null) !== null) { S.crosstalk = LS.get('crosstalk'); LS.del('crosstalk'); }
+if (LS.get('camId', null) !== null) { S.camId = LS.get('camId'); LS.del('camId'); }
+const saveS = () => LS.set('settings', S);
+saveS();
+
+/* ---------- pokoje (zapisane na stałe) ---------- */
+function loadRooms() {
+  let r = LS.get('rooms', null);
+  if (!r || !r.length) {
+    const old = LS.get('roomCode', null);           // pokój z wersji 1.x – zachowujemy, żeby stare linki działały
+    r = [{ code: old || genCode(4), name: 'Mój pokój' }];
+    LS.set('rooms', r); LS.set('currentRoom', r[0].code);
+  }
+  return r;
+}
+function curRoom() { const rs = loadRooms(); const c = LS.get('currentRoom', rs[0].code); return rs.find(x => x.code === c) || rs[0]; }
 
 const params = new URLSearchParams(location.search);
 if (params.get('turn')) LS.set('turnUrl', params.get('turn'));
@@ -211,28 +337,41 @@ async function getIceServers() {
   const list = [...CONFIG.iceServers];
   const url = turnUrl();
   if (url) {
-    try {
-      const r = await fetch(url); const j = await r.json();
-      const arr = Array.isArray(j) ? j : (j.iceServers || []);
-      list.push(...arr);
-    } catch (e) { console.warn('TURN', e); toast('Nie udało się pobrać danych TURN – łączę bez nich'); }
+    try { const r = await fetch(url); const j = await r.json(); list.push(...(Array.isArray(j) ? j : (j.iceServers || []))); }
+    catch (e) { console.warn('TURN', e); toast('Nie udało się pobrać danych TURN – łączę bez nich'); }
   }
   return list;
 }
 
+/* ---------- utrzymanie aplikacji przy życiu ---------- */
 let wakeLock = null;
-async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {} }
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && (coach.active || ath.active)) keepAwake();
-  if (document.visibilityState === 'hidden' && coach.rec) toast('Uwaga: przejście do innej aplikacji może przerwać nagrywanie');
-});
-
-// wskaźniki poziomu dźwięku
-let meters = [];
-function makeMeter(ctx, node, el) {
-  const an = ctx.createAnalyser(); an.fftSize = 512; node.connect(an);
-  meters.push({ an, buf: new Float32Array(an.fftSize), el });
+async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch {} }
+function setMediaSession(title) {
+  if (!('mediaSession' in navigator)) return;
+  try { navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'Trener na wodzie' }); navigator.mediaSession.playbackState = 'playing'; } catch {}
 }
+function sessionActive() { return coach.active || ath.active; }
+function saveSession(obj) { LS.set('session', Object.assign({ ts: Date.now() }, obj)); }
+setInterval(() => { const s = LS.get('session', null); if (s && sessionActive()) { s.ts = Date.now(); LS.set('session', s); } }, 60000);
+// ochrona przed przypadkowym zamknięciem / cofnięciem
+window.addEventListener('beforeunload', e => { if (sessionActive() && !window.__leaving) { e.preventDefault(); e.returnValue = ''; } });
+function trapBack() { history.pushState({ trap: 1 }, ''); }
+window.addEventListener('popstate', () => { if (sessionActive()) { trapBack(); toast('Aby wyjść, użyj „Zakończ sesję” / „Rozłącz”'); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && sessionActive()) { keepAwake(); unlockAudio(); if (coach.active) coachHealthCheck(); if (ath.active) athWatchdog(); }
+  if (document.visibilityState === 'hidden' && coach.rec) toast('Uwaga: w tle przeglądarka wstrzymuje kamerę – nagranie może mieć przerwę');
+});
+function unlockAudio() {
+  for (const c of [coach.ctx, ath.ctx]) if (c && c.state !== 'running') c.resume().catch(() => {});
+  for (const a of coach.athletes.values()) if (a.audioEl && a.audioEl.paused) a.audioEl.play().catch(() => {});
+  const au = $('#athAudio'); if (ath.active && au.srcObject && au.paused) au.play().then(() => $('#athUnlock').classList.add('hidden')).catch(() => {});
+}
+document.addEventListener('pointerdown', unlockAudio, { capture: true });
+window.addEventListener('online', () => { if (ath.active) { ath.badSince = 0; athWatchdog(true); } if (coach.active) coachWatchdog(); });
+
+/* ---------- wskaźniki poziomu ---------- */
+let meters = [];
+function makeMeter(ctx, node, el) { const an = ctx.createAnalyser(); an.fftSize = 512; node.connect(an); meters.push({ an, buf: new Float32Array(an.fftSize), el }); }
 (function meterLoop() {
   meters = meters.filter(m => m.el.isConnected);
   for (const m of meters) {
@@ -243,8 +382,96 @@ function makeMeter(ctx, node, el) {
   requestAnimationFrame(meterLoop);
 })();
 
+/* ---------- powiadomienia ---------- */
+const Notif = {
+  ctx: () => coach.ctx || ath.ctx,
+  beep(kind) {
+    const ctx = this.ctx(); if (!S.nSound || !ctx) return;
+    const seq = { join: [660, 880], back: [660, 880, 1100], leave: [720, 480], lost: [420, 420, 420], ok: [880, 1100] }[kind] || [800];
+    let t = ctx.currentTime + 0.02;
+    for (const f of seq) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.3, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.17);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.2); t += 0.21;
+    }
+  },
+  say(text) { if (!S.nVoice || !window.speechSynthesis) return; try { const u = new SpeechSynthesisUtterance(text); u.lang = 'pl-PL'; speechSynthesis.speak(u); } catch {} },
+  event(kind, text) { this.beep(kind); if (S.nText) toast(text, 4000); this.say(text); }
+};
+
+/* ---------- licznik danych ---------- */
+const Stats = {
+  closed: { s: 0, r: 0 }, pcs: new Map(),
+  track(pc) { if (pc && !this.pcs.has(pc)) this.pcs.set(pc, { s: 0, r: 0 }); },
+  async poll(objs) {
+    for (const o of objs) this.track(o && o.peerConnection);
+    for (const [pc, v] of this.pcs) {
+      try {
+        const rep = await pc.getStats(); let s = 0, r = 0, s2 = 0, r2 = 0;
+        rep.forEach(x => {
+          if (x.type === 'transport') { s += x.bytesSent || 0; r += x.bytesReceived || 0; }
+          if (x.type === 'candidate-pair' && (x.nominated || x.state === 'succeeded')) { s2 = Math.max(s2, x.bytesSent || 0); r2 = Math.max(r2, x.bytesReceived || 0); }
+        });
+        if (!s && !r) { s = s2; r = r2; }
+        v.s = Math.max(v.s, s); v.r = Math.max(v.r, r);
+      } catch {}
+      if (pc.connectionState === 'closed' || pc.signalingState === 'closed') { this.closed.s += v.s; this.closed.r += v.r; this.pcs.delete(pc); }
+    }
+  },
+  total() { let s = this.closed.s, r = this.closed.r; for (const v of this.pcs.values()) { s += v.s; r += v.r; } return { s, r }; }
+};
+const sessionStart = { t: 0 };
+function renderData() {
+  const t = Stats.total(), sum = t.s + t.r;
+  $('#dataPill').textContent = '⇅ ' + fmtB(sum);
+  $('#athData').textContent = `Dane w tej sesji: ${fmtB(sum)} (wysłane ${fmtB(t.s)}, odebrane ${fmtB(t.r)})`;
+  const mins = sessionStart.t ? Math.max(1, (Date.now() - sessionStart.t) / 60000) : 1;
+  $('#dataKv').innerHTML = `<span>Wysłane</span><b>${fmtB(t.s)}</b><span>Odebrane</span><b>${fmtB(t.r)}</b><span>Razem</span><b>${fmtB(sum)}</b><span>Średnio</span><b>${fmtB(sum / mins)}/min</b>`;
+}
+setInterval(async () => {
+  if (!sessionActive()) return;
+  const objs = coach.active ? [...coach.athletes.values()].flatMap(a => [a.call]).concat([...coach.conns.values()]) : [ath.call, ath.conn];
+  await Stats.poll(objs.filter(Boolean)); renderData();
+}, 2000);
+
+/* ---------- jakość połączenia ---------- */
+async function applyBitrate(pc, kbps) {
+  if (!pc || !pc.getSenders) return;
+  for (const s of pc.getSenders()) {
+    if (!s.track || s.track.kind !== 'audio') continue;
+    try { const p = s.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}]; p.encodings[0].maxBitrate = kbps * 1000; await s.setParameters(p); } catch {}
+  }
+}
+
+/* ---------- aktualizacje ---------- */
+let updAvail = null;
+async function checkUpdate(manual) {
+  if (manual) $('#updInfo').textContent = 'Sprawdzam…';
+  try {
+    const r = await fetch(location.pathname + '?check=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/APP_VERSION\s*=\s*'([\d.]+)'/);
+    if (!m) throw new Error('brak wersji');
+    if (cmpVer(m[1], APP_VERSION) > 0) {
+      updAvail = m[1];
+      $('#updInfo').textContent = `Dostępna wersja ${updAvail}`;
+      $('#btnDoUpd').classList.remove('hidden'); $('#btnUpdBadge').classList.remove('hidden');
+      if (!manual) toast(`Dostępna aktualizacja ${updAvail} – Ustawienia → Aplikacja`, 5000);
+    } else if (manual) $('#updInfo').textContent = 'Masz najnowszą wersję';
+  } catch (e) { if (manual) $('#updInfo').textContent = 'Nie udało się sprawdzić (brak internetu?)'; }
+}
+function doUpdate() {
+  if (coach.rec) return toast('Zakończ nagrywanie przed aktualizacją');
+  window.__leaving = true;
+  location.replace(location.pathname + '?wznow=1&v=' + (updAvail || Date.now()));
+}
+$('#btnCheckUpd').onclick = () => checkUpdate(true);
+$('#btnDoUpd').onclick = doUpdate;
+$('#btnUpdBadge').onclick = () => openSettings();
+$('#verTxt').textContent = APP_VERSION; $('#homeVer').textContent = 'wersja ' + APP_VERSION;
+
 /* ================= EKRAN STARTOWY ================= */
-$('#goCoach').onclick = startCoach;
+$('#goCoach').onclick = () => startCoach();
 $('#goAthlete').onclick = () => openJoin();
 $('#joinBack').onclick = () => show('home');
 function openJoin(code) {
@@ -254,78 +481,189 @@ function openJoin(code) {
   ($('#joinName').value ? $('#joinCode') : $('#joinName')).focus();
 }
 $('#joinBtn').onclick = () => {
-  const name = $('#joinName').value.trim(), code = $('#joinCode').value.trim().toUpperCase();
+  const name = $('#joinName').value.trim(), code = sanitizeCode($('#joinCode').value);
   if (!name) return toast('Wpisz imię');
   if (code.length < 4) return toast('Wpisz kod pokoju');
   startAthlete(code, name);
 };
-if (params.get('pokoj')) openJoin(params.get('pokoj').toUpperCase());
+
+/* ================= STABILIZACJA (żyroskop) ================= */
+const Stab = {
+  running: false, hist: [], th: [0, 0, 0], lp: [0, 0, 0], lastTs: 0, sensor: null, mh: null,
+  start() {
+    if (this.running) return; this.running = true; this.reset();
+    try {
+      if ('Gyroscope' in window) {
+        const g = new Gyroscope({ frequency: 120, referenceFrame: 'device' });
+        g.addEventListener('reading', () => this.sample(g.x, g.y, g.z, g.timestamp || performance.now()));
+        g.addEventListener('error', e => { console.warn('Gyroscope', e.error); try { g.stop(); } catch {} this.sensor = null; this.useMotion(); });
+        g.start(); this.sensor = g; return;
+      }
+    } catch (e) { console.warn(e); }
+    this.useMotion();
+  },
+  useMotion() {
+    if (this.mh) return;
+    const k = Math.PI / 180;
+    this.mh = e => { const r = e.rotationRate; if (r) this.sample((r.beta || 0) * k, (r.gamma || 0) * k, (r.alpha || 0) * k, e.timeStamp || performance.now()); };
+    window.addEventListener('devicemotion', this.mh);
+  },
+  stop() {
+    this.running = false;
+    if (this.sensor) { try { this.sensor.stop(); } catch {} this.sensor = null; }
+    if (this.mh) { window.removeEventListener('devicemotion', this.mh); this.mh = null; }
+  },
+  reset() { this.th = [0, 0, 0]; this.lp = [0, 0, 0]; this.hist = []; this.lastTs = 0; },
+  sample(wx, wy, wz, ts) {
+    if (!this.lastTs) { this.lastTs = ts; return; }
+    const dt = Math.min(0.1, Math.max(0, (ts - this.lastTs) / 1000)); this.lastTs = ts;
+    if (!dt) return;
+    const w = [wx, wy, wz], a = dt / (S.stabSm + dt), j = [0, 0, 0];
+    for (let i = 0; i < 3; i++) { this.th[i] += w[i] * dt; this.lp[i] += (this.th[i] - this.lp[i]) * a; j[i] = this.th[i] - this.lp[i]; }
+    this.hist.push({ ts, j });
+    if (this.hist.length > 400) this.hist.splice(0, this.hist.length - 400);
+  },
+  at(ts) { const h = this.hist; for (let i = h.length - 1; i >= 0; i--) if (h[i].ts <= ts) return h[i].j; return h.length ? h[0].j : [0, 0, 0]; }
+};
+const Render = {
+  running: false, canvas: null, c2d: null, track: null, fps: 30,
+  gen: 0,
+  start() {
+    if (this.running) return; this.running = true; this.gen++;
+    this.canvas = $('#stabCanvas'); this.c2d = this.c2d || this.canvas.getContext('2d', { alpha: false });
+    this.loop(this.gen);
+  },
+  stop() { this.running = false; },
+  getTrack(fps) {
+    if (!this.track || this.track.readyState === 'ended' || this.fps !== fps) { this.fps = fps; this.track = this.canvas.captureStream(fps).getVideoTracks()[0]; }
+    return this.track;
+  },
+  loop(gen) {
+    if (!this.running || gen !== this.gen) return;
+    const v = $('#preview');
+    const next = (now, meta) => { if (!this.running || gen !== this.gen) return; this.draw(meta); this.loop(gen); };
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(next); else requestAnimationFrame(() => next(performance.now(), null));
+  },
+  draw(meta) {
+    const v = $('#preview'), cv = this.canvas, c = this.c2d;
+    const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return;
+    if (!coach.rec && (cv.width !== vw || cv.height !== vh)) { cv.width = vw; cv.height = vh; }
+    const W = cv.width, H = cv.height, fit = Math.min(W / vw, H / vh);
+    const m = 0.075, sc = 1 + 2 * m;          // margines na korektę (kadr przycięty o ~15%)
+    const t = ((meta && meta.captureTime) ? meta.captureTime : performance.now() - 40) - S.stabDl;
+    const j = Stab.at(t);
+    const zoom = (coach.videoTrack && coach.videoTrack.getSettings().zoom) || 1;
+    const f = (Math.hypot(vw, vh) / 2) / Math.tan(CONFIG.cameraDfovDeg * Math.PI / 360) * zoom * fit * sc * S.stabStr;
+    let dx = -f * j[1], dy = f * j[0];        // kompensacja w układzie telefonu (oś Y w górę)
+    if (S.stabInvX) dx = -dx; if (S.stabInvY) dy = -dy;
+    const a = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180;
+    let ox = Math.cos(a) * dx - Math.sin(a) * dy, oy = -(Math.sin(a) * dx + Math.cos(a) * dy);
+    const mx = Math.max(0, (vw * fit * sc - W) / 2), my = Math.max(0, (vh * fit * sc - H) / 2);
+    ox = Math.max(-mx, Math.min(mx, ox)); oy = Math.max(-my, Math.min(my, oy));
+    const rot = S.stabRoll ? Math.max(-0.06, Math.min(0.06, -j[2] * S.stabStr)) : 0;
+    c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+    c.save(); c.translate(W / 2 + ox, H / 2 + oy); c.rotate(rot); c.scale(fit * sc, fit * sc);
+    c.drawImage(v, -vw / 2, -vh / 2, vw, vh); c.restore();
+  }
+};
+function applyStab() {
+  const on = S.stab && coach.active;
+  $('#btnStab').classList.toggle('on', on);
+  $('#stabCanvas').classList.toggle('hidden', !on);
+  $('#preview').classList.toggle('ghost', on);
+  if (on) { Stab.start(); Render.start(); } else { Stab.stop(); Render.stop(); }
+}
+$('#btnStab').onclick = () => {
+  if (coach.rec) return toast('Nie można przełączać stabilizacji podczas nagrywania');
+  S.stab = !S.stab; saveS(); applyStab();
+  toast(S.stab ? 'Stabilizacja włączona' : 'Stabilizacja wyłączona');
+};
 
 /* ================= TRENER ================= */
 const coach = {
-  active: false, ctx: null, micStream: null, videoTrack: null, sendGain: null, recDest: null,
-  athletes: new Map(), peer: null, ice: [], code: null, micOn: true, rec: null, memFiles: [],
-  includeAth: LS.get('incAth', true), crosstalk: LS.get('crosstalk', false)
+  active: false, ctx: null, micStream: null, micSrc: null, micBus: null, hp: null, videoTrack: null, sendGain: null, recDest: null,
+  athletes: new Map(), conns: new Map(), peer: null, ice: [], micOn: true, rec: null, memFiles: [], timers: []
 };
+const room = () => curRoom();
 
 async function startCoach() {
   if (!window.Peer) return alert('Nie udało się wczytać biblioteki połączeń. Sprawdź internet i odśwież stronę.');
-  coach.code = LS.get('roomCode', null) || genCode(); LS.set('roomCode', coach.code);
+  const ctx = coach.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume().catch(() => {});
   try {
-    const ctx = coach.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    await ctx.resume();
-    coach.micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
-    });
-    await startCamera(LS.get('camId', null));
-    // graf audio: mikrofon -> (wysyłka do zawodników) + (nagranie)
-    const src = ctx.createMediaStreamSource(coach.micStream);
-    coach.sendGain = ctx.createGain(); src.connect(coach.sendGain);
+    coach.micBus = ctx.createGain();
+    coach.hp = ctx.createBiquadFilter(); coach.hp.type = 'highpass'; coach.hp.Q.value = 0.7;
+    coach.sendGain = ctx.createGain();
     coach.recDest = ctx.createMediaStreamDestination();
-    src.connect(coach.recDest);
-    makeMeter(ctx, src, $('#micMeter'));
-  } catch (e) {
-    console.error(e);
-    return alert('Brak dostępu do kamery lub mikrofonu: ' + e.message);
-  }
-  coach.active = true;
-  show('coach');
-  $('#roomCode').textContent = coach.code;
-  keepAwake();
+    coach.micBus.connect(coach.recDest);
+    coach.micBus.connect(coach.hp); coach.hp.connect(coach.sendGain);
+    makeMeter(ctx, coach.micBus, $('#micMeter'));
+    applyWind();
+    await setupCoachMic();
+    await startCamera();
+  } catch (e) { console.error(e); return alert('Brak dostępu do kamery lub mikrofonu: ' + e.message); }
+  coach.active = true; sessionStart.t = Date.now();
+  saveSession({ role: 'coach' });
+  show('coach'); trapBack(); updRoomUI(); applyStab();
+  keepAwake(); setMediaSession('Sesja trenera – ' + room().name);
   navigator.storage?.persist?.().catch(() => {});
   coach.ice = await getIceServers();
   connectCoachPeer();
-  setInterval(coachWatchdog, 5000);
-  setInterval(checkAthletes, 3000);
-  window.addEventListener('beforeunload', e => { if (coach.rec) { e.preventDefault(); e.returnValue = ''; } });
+  coach.timers.push(setInterval(coachWatchdog, 5000), setInterval(checkAthletes, 2000), setInterval(broadcastRoster, 10000), setInterval(coachHealthCheck, 5000));
+  setTimeout(() => checkUpdate(false), 4000);
 }
 
-async function startCamera(deviceId) {
-  const v = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
-  if (deviceId) v.deviceId = { exact: deviceId }; else v.facingMode = { ideal: 'environment' };
+async function setupCoachMic() {
+  const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: S.coachNoise, autoGainControl: false, channelCount: 1 } });
+  if (coach.micSrc) try { coach.micSrc.disconnect(); } catch {}
+  if (coach.micStream) coach.micStream.getTracks().forEach(t => t.stop());
+  coach.micStream = st;
+  coach.micSrc = coach.ctx.createMediaStreamSource(st); coach.micSrc.connect(coach.micBus);
+  st.getAudioTracks()[0].addEventListener('ended', () => { if (coach.active) setTimeout(() => setupCoachMic().catch(() => {}), 1000); });
+}
+function applyWind() { if (coach.hp) coach.hp.frequency.value = S.coachWind ? 160 : 10; if (ath.hp) ath.hp.frequency.value = S.athWind ? 160 : 10; }
+
+async function startCamera() {
+  const q = QUALITY[S.quality] || QUALITY['1080p30'];
+  const v = { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } };
+  if (S.camId) v.deviceId = { exact: S.camId }; else v.facingMode = { ideal: 'environment' };
   if (coach.videoTrack) coach.videoTrack.stop();
   let s;
   try { s = await navigator.mediaDevices.getUserMedia({ video: v }); }
-  catch (e) { if (deviceId) { LS.set('camId', null); return startCamera(null); } throw e; }
+  catch (e) { if (S.camId) { S.camId = null; saveS(); return startCamera(); } throw e; }
   coach.videoTrack = s.getVideoTracks()[0];
+  coach.videoTrack.addEventListener('ended', () => { if (coach.active && !coach.camRestarting) restartCamera(); });
   $('#preview').srcObject = s;
-  setupZoom();
-  fillCameraList();
+  setupZoom(); fillCameraList();
+}
+async function restartCamera() {
+  coach.camRestarting = true;
+  try { await startCamera(); } catch (e) { console.warn(e); } finally { coach.camRestarting = false; }
+}
+function coachHealthCheck() {
+  if (!coach.active) return;
+  if (coach.ctx && coach.ctx.state !== 'running') coach.ctx.resume().catch(() => {});
+  if (!coach.camRestarting && coach.videoTrack && coach.videoTrack.readyState === 'ended' && document.visibilityState === 'visible') restartCamera();
+  const mt = coach.micStream && coach.micStream.getAudioTracks()[0];
+  if (mt && mt.readyState === 'ended') setupCoachMic().catch(() => {});
 }
 
 async function fillCameraList() {
   const sel = $('#camSel'); sel.innerHTML = '';
   const cur = coach.videoTrack?.getSettings().deviceId;
   const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-  devs.forEach((d, i) => {
-    const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `Kamera ${i + 1}`;
-    if (d.deviceId === cur) o.selected = true; sel.appendChild(o);
-  });
+  devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `Kamera ${i + 1}`; if (d.deviceId === cur) o.selected = true; sel.appendChild(o); });
 }
 $('#camSel').onchange = async e => {
   if (coach.rec) { toast('Zatrzymaj nagrywanie, aby zmienić kamerę'); return fillCameraList(); }
-  LS.set('camId', e.target.value);
-  try { await startCamera(e.target.value); } catch (err) { toast('Nie można włączyć tej kamery'); }
+  S.camId = e.target.value; saveS();
+  try { await startCamera(); } catch { toast('Nie można włączyć tej kamery'); }
+};
+Object.entries(QUALITY).forEach(([k, q]) => { const o = document.createElement('option'); o.value = k; o.textContent = q.label; $('#qualSel').appendChild(o); });
+$('#qualSel').onchange = async e => {
+  if (coach.rec) { toast('Zatrzymaj nagrywanie, aby zmienić jakość'); e.target.value = S.quality; return; }
+  S.quality = e.target.value; saveS();
+  try { await startCamera(); const st = coach.videoTrack.getSettings(); toast(`Kamera: ${st.width}×${st.height}, ${Math.round(st.frameRate || 0)} kl/s`); } catch { toast('Kamera nie obsługuje tej jakości'); }
 };
 
 function setupZoom() {
@@ -338,13 +676,14 @@ function setupZoom() {
 function updZoomLbl() { $('#zoomLbl').textContent = (+$('#zoom').value).toFixed(1) + '×'; }
 $('#zoom').oninput = e => { coach.videoTrack.applyConstraints({ advanced: [{ zoom: +e.target.value }] }).catch(() => {}); updZoomLbl(); };
 
+/* ---------- serwer / pokój ---------- */
 function setPeerDot(st) { $('#peerDot').className = 'dot ' + (st === 'ok' ? 'ok' : st === 'err' ? 'err' : ''); }
-
 function connectCoachPeer() {
   setPeerDot('wait');
-  const p = coach.peer = new Peer(CONFIG.peerPrefix + coach.code, { config: { iceServers: coach.ice }, debug: 1 });
+  const p = coach.peer = new Peer(CONFIG.peerPrefix + room().code, { config: { iceServers: coach.ice }, debug: 1 });
   p.on('open', () => setPeerDot('ok'));
   p.on('call', onAthleteCall);
+  p.on('connection', onAthleteConn);
   p.on('disconnected', () => setPeerDot('wait'));
   p.on('error', e => {
     console.warn('peer', e.type, e);
@@ -353,81 +692,172 @@ function connectCoachPeer() {
   });
 }
 function coachWatchdog() {
+  if (!coach.active) return;
   const p = coach.peer;
   if (!p || p.destroyed) return connectCoachPeer();
   if (p.disconnected) { try { p.reconnect(); } catch { p.destroy(); } }
 }
+function switchRoom(code) {
+  for (const k of [...coach.athletes.keys()]) dropAthlete(k, false);
+  for (const c of coach.conns.values()) try { c.close(); } catch {}
+  coach.conns.clear();
+  try { coach.peer.destroy(); } catch {}
+  LS.set('currentRoom', code); updRoomUI(); connectCoachPeer();
+}
+function updRoomUI() {
+  const r = room();
+  $('#roomPill').textContent = `${r.name} · ${r.code}`;
+  $('#invTitle').textContent = 'Zaproś do: ' + r.name;
+  const sel = $('#roomSel'); sel.innerHTML = '';
+  for (const x of loadRooms()) { const o = document.createElement('option'); o.value = x.code; o.textContent = `${x.name} (${x.code})`; if (x.code === r.code) o.selected = true; sel.appendChild(o); }
+  $('#roomName').value = r.name;
+}
+function confirmDrop() { return ![...coach.athletes.values()].some(a => a.status === 'online') || confirm('Zawodnicy zostaną rozłączeni. Kontynuować?'); }
+$('#roomSel').onchange = e => { if (!confirmDrop()) return updRoomUI(); switchRoom(e.target.value); };
+$('#roomName').onchange = e => {
+  const rs = loadRooms(), r = rs.find(x => x.code === room().code); r.name = e.target.value.trim().slice(0, 40) || 'Pokój'; LS.set('rooms', rs);
+  updRoomUI(); broadcastRoster(); toast('Zapisano nazwę pokoju');
+};
+$('#btnRoomNew').onclick = () => {
+  const name = prompt('Nazwa nowego pokoju (np. grupa Optimist):', 'Nowy pokój'); if (name === null) return;
+  if (!confirmDrop()) return;
+  const rs = loadRooms(); let code; do code = genCode(4); while (rs.some(x => x.code === code));
+  rs.push({ code, name: name.trim().slice(0, 40) || 'Pokój' }); LS.set('rooms', rs); switchRoom(code);
+  toast('Utworzono pokój ' + code);
+};
+$('#btnRoomCode').onclick = () => {
+  const r = room();
+  const v = prompt('Nowy kod pokoju (4–8 znaków: litery i cyfry). Stary link przestanie działać.', r.code); if (v === null) return;
+  const code = sanitizeCode(v);
+  if (code.length < 4) return toast('Kod musi mieć co najmniej 4 znaki');
+  const rs = loadRooms(); if (rs.some(x => x.code === code && x !== rs.find(y => y.code === r.code))) return toast('Taki pokój już istnieje');
+  if (!confirmDrop()) return;
+  rs.find(x => x.code === r.code).code = code; LS.set('rooms', rs); switchRoom(code);
+};
+$('#btnRoomDel').onclick = () => {
+  const rs = loadRooms(); if (rs.length < 2) return toast('To jedyny pokój – najpierw utwórz inny');
+  const r = room(); if (!confirm(`Usunąć pokój „${r.name}” (${r.code})?`) || !confirmDrop()) return;
+  const left = rs.filter(x => x.code !== r.code); LS.set('rooms', left); switchRoom(left[0].code);
+};
 
-function onAthleteCall(call) {
-  const md = call.metadata || {};
-  const key = md.cid || call.peer;
-  if (coach.athletes.has(key)) removeAthlete(key);
-  if (coach.athletes.size >= 12) { call.close(); return; }
-  const ctx = coach.ctx;
-  const dest = ctx.createMediaStreamDestination();
-  coach.sendGain.connect(dest);
-  const a = { key, name: (md.name || 'Zawodnik').slice(0, 24), call, dest, src: null, relay: null, recGain: null, audioEl: null, muted: false, badSince: 0 };
-  for (const o of coach.athletes.values()) if (o.relay) o.relay.connect(dest);
-  coach.athletes.set(key, a);
-  renderAthlete(a);
-  call.answer(dest.stream);
-  call.on('stream', remote => attachAthleteStream(a, remote));
-  call.on('close', () => { if (coach.athletes.get(key) === a) removeAthlete(key); });
-  call.on('error', () => { if (coach.athletes.get(key) === a) removeAthlete(key); });
-  toast(`${a.name} dołącza`);
+/* ---------- zawodnicy po stronie trenera ---------- */
+function rosterMsg() {
+  return { t: 'roster', room: room().name, code: room().code, list: [...coach.athletes.values()].map(a => ({ id: a.cid, name: a.name, on: a.status === 'online' })) };
+}
+function broadcast(msg) { for (const c of coach.conns.values()) if (c.open) try { c.send(msg); } catch {} }
+function broadcastRoster() { if (coach.active) broadcast(rosterMsg()); }
+
+function onAthleteConn(conn) {
+  const cid = (conn.metadata && conn.metadata.cid) || conn.peer;
+  conn.on('open', () => {
+    const old = coach.conns.get(cid); if (old && old !== conn) try { old.close(); } catch {}
+    coach.conns.set(cid, conn);
+    try { conn.send(rosterMsg()); conn.send({ t: 'cfg', kbps: S.kbps }); } catch {}
+  });
+  conn.on('data', d => {
+    if (d && d.t === 'bye') { const a = coach.athletes.get(cid); if (a) { Notif.event('leave', `${a.name} rozłącza się`); dropAthlete(cid, false); broadcastRoster(); } }
+  });
+  conn.on('close', () => { if (coach.conns.get(cid) === conn) coach.conns.delete(cid); });
+  conn.on('error', () => {});
 }
 
-function attachAthleteStream(a, remote) {
-  if (a.src) return;
+function onAthleteCall(call) {
+  const md = call.metadata || {}, cid = md.cid || call.peer, name = (md.name || 'Zawodnik').slice(0, 24);
+  let a = coach.athletes.get(cid);
+  if (a) { teardownMedia(a); a.name = name; a.el.querySelector('.nm').textContent = name; if (a.status !== 'offline') a.status = 'reconnecting'; }
+  else {
+    if (coach.athletes.size >= 12) { call.close(); return; }
+    a = { cid, name, status: 'connecting', muted: false, badSince: 0, offlineSince: 0, wasOnline: false, since: Date.now() };
+    coach.athletes.set(cid, a); renderAthlete(a);
+  }
+  const ctx = coach.ctx;
+  const dest = ctx.createMediaStreamDestination(); dest.channelCount = 1;
+  coach.sendGain.connect(dest);
+  for (const o of coach.athletes.values()) if (o !== a && o.relay) o.relay.connect(dest);
+  a.call = call; a.dest = dest; a.since = Date.now(); a.badSince = 0;
+  call.answer(dest.stream);
+  call.on('stream', remote => attachAthleteStream(a, call, remote));
+  call.on('close', () => { if (a.call === call) goOffline(a); });
+  call.on('error', () => { if (a.call === call) goOffline(a); });
+  updAthEl(a);
+}
+
+function attachAthleteStream(a, call, remote) {
+  if (a.call !== call || a.src) return;
   const ctx = coach.ctx;
   const au = new Audio(); au.autoplay = true; au.playsInline = true; au.srcObject = remote; au.muted = a.muted;
   au.play().catch(() => {}); a.audioEl = au;
   a.src = ctx.createMediaStreamSource(remote);
   a.recGain = ctx.createGain(); a.src.connect(a.recGain); a.recGain.connect(coach.recDest);
   a.relay = ctx.createGain(); a.src.connect(a.relay);
-  for (const o of coach.athletes.values()) if (o !== a) a.relay.connect(o.dest);
+  for (const o of coach.athletes.values()) if (o !== a && o.dest) a.relay.connect(o.dest);
   updateGains();
   makeMeter(ctx, a.src, a.el.querySelector('.lvl i'));
+  setTimeout(() => applyBitrate(call.peerConnection, S.kbps), 500);
+  setOnline(a);
 }
 
-function removeAthlete(key) {
-  const a = coach.athletes.get(key); if (!a) return;
-  coach.athletes.delete(key);
-  try { a.call.close(); } catch {}
-  try { coach.sendGain.disconnect(a.dest); } catch {}
-  for (const o of coach.athletes.values()) if (o.relay) try { o.relay.disconnect(a.dest); } catch {}
+function setOnline(a) {
+  const prev = a.status; a.status = 'online'; a.badSince = 0;
+  if (prev === 'offline') Notif.event('back', `${a.name} wraca`);
+  else if (prev === 'connecting') Notif.event('join', `${a.name} dołącza`);
+  a.wasOnline = true; updAthEl(a); updAthCount(); broadcastRoster();
+}
+function goOffline(a) {
+  if (a.status === 'offline') return;
+  const prev = a.status;
+  teardownMedia(a);
+  if (prev === 'connecting' && !a.wasOnline) { dropAthlete(a.cid, false); return; }
+  a.status = 'offline'; a.offlineSince = Date.now();
+  Notif.event('leave', `Utracono połączenie: ${a.name}`);
+  updAthEl(a); updAthCount(); broadcastRoster();
+}
+function teardownMedia(a) {
+  const call = a.call; a.call = null;
+  if (call) try { call.close(); } catch {}
+  if (a.dest) { try { coach.sendGain.disconnect(a.dest); } catch {} for (const o of coach.athletes.values()) if (o.relay) try { o.relay.disconnect(a.dest); } catch {} }
   for (const n of [a.relay, a.recGain, a.src]) if (n) try { n.disconnect(); } catch {}
   if (a.audioEl) { a.audioEl.pause(); a.audioEl.srcObject = null; }
-  a.el.remove(); updAthCount();
+  a.dest = a.relay = a.recGain = a.src = a.audioEl = null;
 }
-
+function dropAthlete(cid, notify) {
+  const a = coach.athletes.get(cid); if (!a) return;
+  teardownMedia(a); coach.athletes.delete(cid); a.el.remove(); updAthCount();
+  if (notify) broadcastRoster();
+}
 function checkAthletes() {
   for (const a of [...coach.athletes.values()]) {
-    const st = a.call.peerConnection?.iceConnectionState;
-    const dot = a.el.querySelector('.dot');
-    if (st === 'connected' || st === 'completed') { a.badSince = 0; dot.className = 'dot ok'; continue; }
-    if (st === 'failed' || st === 'closed') { removeAthlete(a.key); continue; }
-    dot.className = 'dot';
+    if (a.status === 'offline') { if (Date.now() - a.offlineSince > 10 * 60000) dropAthlete(a.cid, true); continue; }
+    const st = a.call && a.call.peerConnection && a.call.peerConnection.iceConnectionState;
+    if (st === 'connected' || st === 'completed') { a.badSince = 0; if (a.status !== 'online' && a.src) setOnline(a); continue; }
+    if (st === 'failed' || st === 'closed') { goOffline(a); continue; }
     if (!a.badSince) a.badSince = Date.now();
-    if (Date.now() - a.badSince > 25000) removeAthlete(a.key);
+    const limit = a.status === 'online' ? 12000 : 25000;   // zawodnik sam ponawia połączenie
+    if (Date.now() - a.badSince > limit) goOffline(a);
   }
 }
-
 function renderAthlete(a) {
   const el = document.createElement('button'); el.className = 'ath';
   el.innerHTML = '<div class="row"><span class="dot"></span><span class="nm"></span></div><div class="lvl"><i></i></div>';
   el.querySelector('.nm').textContent = a.name;
-  el.onclick = () => { a.muted = !a.muted; el.classList.toggle('muted', a.muted); if (a.audioEl) a.audioEl.muted = a.muted; updateGains(); };
+  el.onclick = () => { a.muted = !a.muted; if (a.audioEl) a.audioEl.muted = a.muted; updateGains(); updAthEl(a); toast(a.muted ? `${a.name} wyciszony(a) u Ciebie` : `${a.name} słyszalny(a)`); };
   a.el = el; $('#athList').appendChild(el); updAthCount();
 }
-function updAthCount() { $('#athCount').textContent = '👥 ' + coach.athletes.size; }
+function updAthEl(a) {
+  if (!a.el) return;
+  a.el.classList.toggle('muted', a.muted); a.el.classList.toggle('offline', a.status === 'offline');
+  a.el.querySelector('.dot').className = 'dot ' + (a.status === 'online' ? 'ok' : a.status === 'offline' ? 'err' : '');
+}
+function updAthCount() {
+  const all = [...coach.athletes.values()], on = all.filter(a => a.status === 'online').length;
+  $('#athCount').textContent = `👥 ${on}` + (all.length > on ? `/${all.length}` : '');
+}
 function updateGains() {
   for (const a of coach.athletes.values()) {
-    if (a.recGain) a.recGain.gain.value = (coach.includeAth && !a.muted) ? 1 : 0;
-    if (a.relay) a.relay.gain.value = coach.crosstalk ? 1 : 0;
+    if (a.recGain) a.recGain.gain.value = (S.incAth && !a.muted) ? 1 : 0;
+    if (a.relay) a.relay.gain.value = S.crosstalk ? 1 : 0;
   }
 }
-
 $('#btnMic').onclick = () => {
   coach.micOn = !coach.micOn;
   coach.sendGain.gain.value = coach.micOn ? 1 : 0;
@@ -446,25 +876,26 @@ async function openSink(name, type) {
   try {
     const dir = await recDir(); const fh = await dir.getFileHandle(name, { create: true }); const w = await fh.createWritable();
     let q = Promise.resolve();
-    return { write: b => { q = q.then(() => w.write(b)).catch(e => console.warn(e)); },
-             close: async () => { await q; await w.close(); return fh.getFile(); } };
+    return { write: b => { q = q.then(() => w.write(b)).catch(e => console.warn(e)); }, close: async () => { await q; await w.close(); return fh.getFile(); } };
   } catch (e) {
     console.warn('OPFS niedostępny, nagrywam do pamięci', e);
     const parts = [];
-    return { write: b => parts.push(b),
-             close: async () => { const f = new File(parts, name, { type }); coach.memFiles.push({ name, file: f, opfs: false }); return f; } };
+    return { write: b => parts.push(b), close: async () => { const f = new File(parts, name, { type }); coach.memFiles.push({ name, file: f, opfs: false }); return f; } };
   }
 }
 $('#btnRec').onclick = () => coach.rec ? stopRec() : startRec();
 async function startRec() {
   if (!window.MediaRecorder) return alert('Ta przeglądarka nie obsługuje nagrywania.');
-  await coach.ctx.resume();
-  const mime = pickMime(); const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+  await coach.ctx.resume().catch(() => {});
+  const q = QUALITY[S.quality] || QUALITY['1080p30'];
+  const mime = pickMime(), ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
   const name = `trening_${stamp()}.${ext}`;
-  const stream = new MediaStream([coach.videoTrack, coach.recDest.stream.getAudioTracks()[0]]);
+  if (S.stab) { const v = $('#preview'), cv = $('#stabCanvas'); if (v.videoWidth && (cv.width !== v.videoWidth || cv.height !== v.videoHeight)) { cv.width = v.videoWidth; cv.height = v.videoHeight; } }
+  const vTrack = S.stab ? Render.getTrack(q.fps) : coach.videoTrack;
+  const stream = new MediaStream([vTrack, coach.recDest.stream.getAudioTracks()[0]]);
   const sink = await openSink(name, mime.split(';')[0] || 'video/webm');
   let rec;
-  try { rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: CONFIG.videoBitrate, audioBitsPerSecond: CONFIG.audioBitrate }); }
+  try { rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: q.br, audioBitsPerSecond: CONFIG.audioRecBitrate }); }
   catch (e) { return alert('Nie udało się uruchomić nagrywania: ' + e.message); }
   rec.ondataavailable = e => { if (e.data && e.data.size) sink.write(e.data); };
   rec.onstop = async () => { await sink.close(); toast('Zapisano: ' + name); };
@@ -497,15 +928,14 @@ async function renderFiles() {
     const el = document.createElement('div'); el.className = 'file';
     el.innerHTML = '<div class="nm" style="font-weight:600"></div><div class="meta"></div><div class="btnrow"><button data-a="dl">⬇ Pobierz</button><button data-a="sh">↗ Udostępnij</button><button data-a="rm">🗑</button></div>';
     el.querySelector('.nm').textContent = it.name;
-    el.querySelector('.meta').textContent = fmtMB(f.size) + (it.opfs ? '' : ' · tylko do zamknięcia strony');
+    el.querySelector('.meta').textContent = fmtB(f.size) + (it.opfs ? '' : ' · tylko do zamknięcia strony');
     if (!(navigator.canShare && navigator.canShare({ files: [f] }))) el.querySelector('[data-a=sh]').remove();
     el.onclick = async e => {
       const act = e.target.dataset.a; if (!act) return;
       if (act === 'dl') { const u = URL.createObjectURL(f); const a = document.createElement('a'); a.href = u; a.download = it.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 120000); }
       if (act === 'sh') { try { await navigator.share({ files: [f], title: it.name }); } catch {} }
       if (act === 'rm' && confirm('Usunąć ' + it.name + '?')) {
-        if (it.opfs) { try { await (await recDir()).removeEntry(it.name); } catch {} }
-        else coach.memFiles = coach.memFiles.filter(x => x !== it);
+        if (it.opfs) { try { await (await recDir()).removeEntry(it.name); } catch {} } else coach.memFiles = coach.memFiles.filter(x => x !== it);
         renderFiles();
       }
     };
@@ -516,116 +946,232 @@ async function renderFiles() {
 
 /* ---------- zaproszenie ---------- */
 function inviteLink() {
-  let u = location.origin + location.pathname + '?pokoj=' + coach.code;
+  let u = location.origin + location.pathname + '?pokoj=' + room().code;
   if (LS.get('turnUrl', '')) u += '&turn=' + encodeURIComponent(LS.get('turnUrl', ''));
   return u;
 }
 $('#btnInvite').onclick = () => {
   const link = inviteLink();
   $('#inviteLink').textContent = link;
-  try { const qr = qrcode(0, 'M'); qr.addData(link); qr.make(); $('#qrBox').innerHTML = qr.createSvgTag(6, 8); } catch { $('#qrBox').textContent = 'Kod pokoju: ' + coach.code; }
+  try { const qr = qrcode(0, 'M'); qr.addData(link); qr.make(); $('#qrBox').innerHTML = qr.createSvgTag(6, 8); } catch { $('#qrBox').textContent = 'Kod pokoju: ' + room().code; }
   openSheet('#sheetInvite');
 };
-$('#btnShareLink').onclick = async () => { const link = inviteLink(); if (navigator.share) { try { await navigator.share({ title: 'Trening – dołącz', text: 'Dołącz do łączności treningowej:', url: link }); } catch {} } else copy(link); };
+$('#btnShareLink').onclick = async () => { const link = inviteLink(); if (navigator.share) { try { await navigator.share({ title: 'Trening – ' + room().name, text: `Dołącz do łączności treningowej (${room().name}):`, url: link }); } catch {} } else copy(link); };
 $('#btnCopyLink').onclick = () => copy(inviteLink());
 async function copy(t) { try { await navigator.clipboard.writeText(t); toast('Skopiowano link'); } catch { prompt('Skopiuj link:', t); } }
 
-/* ---------- ustawienia ---------- */
-$('#btnSettings').onclick = () => {
-  $('#optIncAth').checked = coach.includeAth; $('#optCross').checked = coach.crosstalk;
+/* ---------- ustawienia (wspólny panel) ---------- */
+function openSettings() {
+  const isCoach = coach.active;
+  document.querySelectorAll('#sheetSettings .coach-only').forEach(e => e.classList.toggle('hidden', !isCoach));
+  $('#optNoise').checked = isCoach ? S.coachNoise : S.athNoise;
+  $('#optWind').checked = isCoach ? S.coachWind : S.athWind;
+  $('#optIncAth').checked = S.incAth; $('#optCross').checked = S.crosstalk;
+  $('#optStab').checked = S.stab; $('#qualSel').value = S.quality; $('#kbpsSel').value = String(S.kbps);
+  $('#stabStr').value = S.stabStr; $('#stabSm').value = S.stabSm; $('#stabDl').value = S.stabDl;
+  $('#stabInvX').checked = S.stabInvX; $('#stabInvY').checked = S.stabInvY; $('#stabRoll').checked = S.stabRoll;
+  updStabLbls();
+  $('#nSound').checked = S.nSound; $('#nText').checked = S.nText; $('#nVoice').checked = S.nVoice;
   $('#turnUrl').value = LS.get('turnUrl', '');
-  const m = pickMime();
-  $('#techInfo').textContent = `Format nagrań: ${m ? m.split(';')[0].replace('video/', '').toUpperCase() : 'brak obsługi'} · TURN: ${turnUrl() ? 'skonfigurowany' : 'brak'} · Serwer: ${coach.peer?.open ? 'połączono' : 'łączenie…'}`;
-  fillCameraList();
+  if (isCoach) {
+    updRoomUI(); fillCameraList();
+    const m = pickMime(), st = coach.videoTrack ? coach.videoTrack.getSettings() : {};
+    $('#techInfo').textContent = `Format nagrań: ${m ? m.split(';')[0].replace('video/', '').toUpperCase() : 'brak obsługi'} · Kamera: ${st.width || '?'}×${st.height || '?'} ${Math.round(st.frameRate || 0)} kl/s · Żyroskop: ${'Gyroscope' in window ? 'tak' : 'przez czujnik ruchu'} · TURN: ${turnUrl() ? 'tak' : 'brak'} · Serwer: ${coach.peer?.open ? 'połączono' : 'łączenie…'}`;
+  }
+  renderData();
   openSheet('#sheetSettings');
+}
+$('#btnSettings').onclick = openSettings;
+$('#athSettings').onclick = openSettings;
+function updStabLbls() { $('#vStr').textContent = Math.round(S.stabStr * 100) + '%'; $('#vSm').textContent = S.stabSm.toFixed(2) + ' s'; $('#vDl').textContent = S.stabDl + ' ms'; }
+$('#optNoise').onchange = async e => {
+  if (coach.active) { S.coachNoise = e.target.checked; saveS(); await setupCoachMic().catch(() => toast('Nie udało się zmienić mikrofonu')); }
+  else { S.athNoise = e.target.checked; saveS(); if (ath.active) await setupAthMic().catch(() => toast('Nie udało się zmienić mikrofonu')); }
 };
-$('#optIncAth').onchange = e => { coach.includeAth = e.target.checked; LS.set('incAth', coach.includeAth); updateGains(); };
-$('#optCross').onchange = e => { coach.crosstalk = e.target.checked; LS.set('crosstalk', coach.crosstalk); updateGains(); };
-$('#btnSaveTurn').onclick = async () => {
-  LS.set('turnUrl', $('#turnUrl').value.trim());
-  coach.ice = await getIceServers();
-  toast('Zapisano. Wyślij zawodnikom nowy link z „Zaproś”.');
+$('#optWind').onchange = e => { if (coach.active) S.coachWind = e.target.checked; else S.athWind = e.target.checked; saveS(); applyWind(); };
+$('#optIncAth').onchange = e => { S.incAth = e.target.checked; saveS(); updateGains(); };
+$('#optCross').onchange = e => { S.crosstalk = e.target.checked; saveS(); updateGains(); };
+$('#optStab').onchange = e => { if (coach.rec) { e.target.checked = S.stab; return toast('Nie można przełączać stabilizacji podczas nagrywania'); } S.stab = e.target.checked; saveS(); applyStab(); };
+$('#stabStr').oninput = e => { S.stabStr = +e.target.value; saveS(); updStabLbls(); };
+$('#stabSm').oninput = e => { S.stabSm = +e.target.value; saveS(); updStabLbls(); };
+$('#stabDl').oninput = e => { S.stabDl = +e.target.value; saveS(); updStabLbls(); };
+$('#stabInvX').onchange = e => { S.stabInvX = e.target.checked; saveS(); };
+$('#stabInvY').onchange = e => { S.stabInvY = e.target.checked; saveS(); };
+$('#stabRoll').onchange = e => { S.stabRoll = e.target.checked; saveS(); };
+$('#kbpsSel').onchange = e => {
+  S.kbps = +e.target.value; saveS();
+  for (const a of coach.athletes.values()) if (a.call) applyBitrate(a.call.peerConnection, S.kbps);
+  broadcast({ t: 'cfg', kbps: S.kbps }); toast('Jakość rozmowy: ' + S.kbps + ' kb/s');
 };
-$('#btnNewCode').onclick = () => {
-  if (!confirm('Nowy kod rozłączy zawodników i unieważni stary link. Kontynuować?')) return;
-  coach.code = genCode(); LS.set('roomCode', coach.code); $('#roomCode').textContent = coach.code;
-  for (const k of [...coach.athletes.keys()]) removeAthlete(k);
-  try { coach.peer.destroy(); } catch {}
-  connectCoachPeer();
+for (const k of ['nSound', 'nText', 'nVoice']) $('#' + k).onchange = e => { S[k] = e.target.checked; saveS(); if (e.target.checked && k === 'nSound') Notif.beep('ok'); if (e.target.checked && k === 'nVoice') Notif.say('Komunikaty głosowe włączone'); };
+$('#btnSaveTurn').onclick = async () => { LS.set('turnUrl', $('#turnUrl').value.trim()); coach.ice = await getIceServers(); toast('Zapisano. Wyślij zawodnikom nowy link z „Zaproś”.'); };
+$('#btnEnd').onclick = () => {
+  if (coach.rec && !confirm('Trwa nagrywanie. Zakończyć?')) return;
+  if (coach.rec) stopRec();
+  LS.del('session'); window.__leaving = true;
+  setTimeout(() => location.href = location.pathname, 1200);
 };
-$('#btnEnd').onclick = () => { if (coach.rec && !confirm('Trwa nagrywanie. Zakończyć?')) return; if (coach.rec) stopRec(); setTimeout(() => location.href = location.pathname, 800); };
 
 /* ================= ZAWODNIK ================= */
-const ath = { active: false, peer: null, call: null, mic: null, code: null, name: null, ice: [], badSince: 0, watch: null, cid: LS.get('cid', null) || genCode(10) };
+const ath = {
+  active: false, peer: null, call: null, conn: null, code: null, name: null, ice: [], badSince: 0, watch: null,
+  ctx: null, micStream: null, micSrc: null, micBus: null, hp: null, muteGain: null, sendDest: null,
+  muted: false, link: false, everLinked: false, roster: null, roomName: '', kbps: 32, connT: 0,
+  cid: LS.get('cid', null) || genCode(10)
+};
 LS.set('cid', ath.cid);
-
 function setAth(st, txt) { $('#athDot').className = 'dot ' + (st === 'ok' ? 'ok' : st === 'err' ? 'err' : ''); $('#athStatus').textContent = txt; }
+
+async function setupAthMic() {
+  const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: S.athNoise, autoGainControl: true } });
+  if (ath.micSrc) try { ath.micSrc.disconnect(); } catch {}
+  if (ath.micStream) ath.micStream.getTracks().forEach(t => t.stop());
+  ath.micStream = st;
+  ath.micSrc = ath.ctx.createMediaStreamSource(st); ath.micSrc.connect(ath.micBus);
+  st.getAudioTracks()[0].addEventListener('ended', () => { if (ath.active) setTimeout(() => setupAthMic().catch(() => {}), 1000); });
+}
 
 async function startAthlete(code, name) {
   if (!window.Peer) return alert('Nie udało się wczytać biblioteki połączeń. Sprawdź internet i odśwież stronę.');
+  const ctx = ath.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume().catch(() => {});
   ath.code = code; ath.name = name; LS.set('athName', name); LS.set('lastRoom', code);
-  $('#athRoom').textContent = code; show('athlete'); ath.active = true;
-  $('#athAudio').play().catch(() => {}); // odblokowanie odtwarzania gestem
-  try { ath.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
-  catch (e) { return setAth('err', 'Brak dostępu do mikrofonu'); }
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  makeMeter(ctx, ctx.createMediaStreamSource(ath.mic), $('#athMeter'));
-  keepAwake();
+  $('#athRoomName').textContent = 'Pokój ' + code; show('athlete'); trapBack(); ath.active = true; sessionStart.t = Date.now();
+  saveSession({ role: 'athlete', room: code, name });
+  $('#athAudio').play().catch(() => {});
+  try {
+    ath.micBus = ctx.createGain();
+    ath.hp = ctx.createBiquadFilter(); ath.hp.type = 'highpass'; ath.hp.Q.value = 0.7;
+    ath.muteGain = ctx.createGain();
+    ath.sendDest = ctx.createMediaStreamDestination(); ath.sendDest.channelCount = 1;
+    ath.micBus.connect(ath.hp); ath.hp.connect(ath.muteGain); ath.muteGain.connect(ath.sendDest);
+    makeMeter(ctx, ath.micBus, $('#athMeter'));
+    applyWind();
+    await setupAthMic();
+  } catch (e) { return setAth('err', 'Brak dostępu do mikrofonu'); }
+  keepAwake(); setMediaSession('Połączenie z trenerem');
   setAth('wait', 'Łączenie z serwerem…');
   ath.ice = await getIceServers();
   athConnectPeer();
-  ath.watch = setInterval(athWatchdog, 4000);
+  ath.watch = setInterval(athWatchdog, 3000);
+  setTimeout(() => checkUpdate(false), 4000);
 }
+const coachId = () => CONFIG.peerPrefix + ath.code;
 function athConnectPeer() {
   const p = ath.peer = new Peer(undefined, { config: { iceServers: ath.ice }, debug: 1 });
-  p.on('open', athCall);
+  p.on('open', () => { athCall(); athConnectData(); });
   p.on('error', e => {
     console.warn('peer', e.type, e);
-    if (e.type === 'peer-unavailable') { ath.call = null; setAth('wait', 'Trener jeszcze nie jest online – czekam…'); }
+    if (e.type === 'peer-unavailable') { ath.call = null; ath.conn = null; if (!ath.link) setAth('wait', 'Trener jeszcze nie jest online – czekam…'); }
   });
+}
+function athConnectData() {
+  const p = ath.peer; if (!p || !p.open || p.disconnected) return;
+  if (ath.conn) try { ath.conn.close(); } catch {}
+  const c = ath.conn = p.connect(coachId(), { reliable: true, metadata: { cid: ath.cid, name: ath.name } });
+  ath.connT = Date.now();
+  c.on('data', onCoachData);
+  c.on('close', () => { if (ath.conn === c) ath.conn = null; });
+  c.on('error', () => {});
+}
+function onCoachData(d) {
+  if (!d || typeof d !== 'object') return;
+  if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); }
+  if (d.t === 'roster') {
+    ath.roomName = d.room || ''; $('#athRoomName').textContent = (ath.roomName || 'Pokój') + ' · ' + ath.code;
+    const next = new Map(d.list.map(x => [x.id, x]));
+    if (ath.roster) {
+      for (const [id, x] of next) {
+        if (id === ath.cid) continue;
+        const was = ath.roster.get(id);
+        if (x.on && (!was || !was.on)) Notif.event(was ? 'back' : 'join', was ? `${x.name} wraca` : `${x.name} dołącza`);
+        if (!x.on && was && was.on) Notif.event('leave', `Utracono połączenie: ${x.name}`);
+      }
+      for (const [id, x] of ath.roster) if (!next.has(id) && x.on && id !== ath.cid) Notif.event('leave', `${x.name} rozłącza się`);
+    }
+    ath.roster = next; renderAthRoster();
+  }
+}
+function renderAthRoster() {
+  const box = $('#athRoster'); box.innerHTML = '';
+  const add = (name, on) => { const s = document.createElement('span'); s.className = on ? '' : 'off'; s.innerHTML = `<i class="dot ${on ? 'ok' : 'err'}"></i>`; s.append(name); box.appendChild(s); };
+  add('Trener', ath.link);
+  if (ath.roster) for (const [id, x] of ath.roster) add(id === ath.cid ? x.name + ' (Ty)' : x.name, x.on);
+}
+function setLink(up) {
+  if (up === ath.link) return;
+  ath.link = up;
+  if (up) { setAth('ok', 'Połączono z trenerem'); if (ath.everLinked) Notif.event('back', 'Połączenie z trenerem przywrócone'); else Notif.beep('ok'); ath.everLinked = true; }
+  else if (ath.everLinked) { setAth('err', 'Utracono połączenie – łączę ponownie…'); Notif.event('lost', 'Utracono połączenie z trenerem'); }
+  renderAthRoster();
 }
 function athCall() {
   const p = ath.peer; if (!ath.active || !p || !p.open || p.disconnected) return;
-  if (ath.call) { try { ath.call.close(); } catch {} }
+  if (ath.call) { const old = ath.call; ath.call = null; try { old.close(); } catch {} }
   ath.badSince = 0;
-  const c = ath.call = p.call(CONFIG.peerPrefix + ath.code, ath.mic, { metadata: { name: ath.name, cid: ath.cid } });
+  const c = ath.call = p.call(coachId(), ath.sendDest.stream, { metadata: { name: ath.name, cid: ath.cid } });
   if (!c) return;
-  if ($('#athStatus').textContent.indexOf('czekam') < 0) setAth('wait', 'Dzwonię do trenera…');
+  if (!ath.everLinked && $('#athStatus').textContent.indexOf('czekam') < 0) setAth('wait', 'Dzwonię do trenera…');
   c.on('stream', s => {
+    if (ath.call !== c) return;
     const au = $('#athAudio'); au.srcObject = s;
     au.play().then(() => $('#athUnlock').classList.add('hidden')).catch(() => $('#athUnlock').classList.remove('hidden'));
-    setAth('ok', 'Połączono z trenerem');
+    setLink(true);
+    setTimeout(() => applyBitrate(c.peerConnection, ath.kbps), 500);
   });
-  c.on('close', () => { if (ath.call === c) { ath.call = null; if (ath.active) setAth('wait', 'Rozłączono – łączę ponownie…'); } });
+  c.on('close', () => { if (ath.call === c) { ath.call = null; setLink(false); } });
   c.on('error', () => { if (ath.call === c) ath.call = null; });
 }
-function athWatchdog() {
+function athWatchdog(force) {
   if (!ath.active) return;
+  if (ath.ctx && ath.ctx.state !== 'running') ath.ctx.resume().catch(() => {});
   const p = ath.peer;
   if (!p || p.destroyed) return athConnectPeer();
-  if (p.disconnected) { try { p.reconnect(); } catch { p.destroy(); } }
+  if (p.disconnected) { try { p.reconnect(); } catch { p.destroy(); } return; }
+  if (!p.open) return;
+  if ((!ath.conn || !ath.conn.open) && Date.now() - ath.connT > 6000) athConnectData();
   const c = ath.call;
   if (!c) return athCall();
-  const st = c.peerConnection?.iceConnectionState;
-  if (st === 'connected' || st === 'completed') { ath.badSince = 0; if (!$('#athDot').classList.contains('ok')) setAth('ok', 'Połączono z trenerem'); return; }
-  if (st === 'failed' || st === 'closed') return athCall();
-  if (st === 'disconnected') setAth('wait', 'Słaby sygnał…');
+  const st = c.peerConnection && c.peerConnection.iceConnectionState;
+  if (st === 'connected' || st === 'completed') { ath.badSince = 0; if (!ath.link && $('#athAudio').srcObject) setLink(true); return; }
+  if (st === 'failed' || st === 'closed' || force === true) { setLink(false); return athCall(); }
   if (!ath.badSince) ath.badSince = Date.now();
-  if (Date.now() - ath.badSince > 15000) athCall();
+  if (st === 'disconnected' && Date.now() - ath.badSince > 4000) setLink(false);
+  if (Date.now() - ath.badSince > (ath.link ? 8000 : 15000)) { setLink(false); athCall(); }
 }
 $('#athMute').onclick = () => {
-  const t = ath.mic?.getAudioTracks()[0]; if (!t) return;
-  t.enabled = !t.enabled;
-  $('#athMute').textContent = t.enabled ? '🎙 Mikrofon włączony' : '🔇 Mikrofon wyciszony';
-  $('#athMute').classList.toggle('primary', t.enabled);
+  ath.muted = !ath.muted; if (ath.muteGain) ath.muteGain.gain.value = ath.muted ? 0 : 1;
+  $('#athMute').textContent = ath.muted ? '🔇 Mikrofon wyciszony' : '🎙 Mikrofon włączony';
+  $('#athMute').classList.toggle('primary', !ath.muted);
 };
 $('#athUnlock').onclick = () => $('#athAudio').play().then(() => $('#athUnlock').classList.add('hidden')).catch(() => {});
 $('#athLeave').onclick = () => {
-  ath.active = false; clearInterval(ath.watch);
-  try { ath.call?.close(); } catch {} try { ath.peer?.destroy(); } catch {}
-  ath.mic?.getTracks().forEach(t => t.stop());
-  location.href = location.pathname;
+  if (!confirm('Rozłączyć się z trenerem?')) return;
+  try { ath.conn && ath.conn.open && ath.conn.send({ t: 'bye' }); } catch {}
+  ath.active = false; clearInterval(ath.watch); LS.del('session'); window.__leaving = true;
+  setTimeout(() => {
+    try { ath.call?.close(); } catch {} try { ath.peer?.destroy(); } catch {}
+    ath.micStream?.getTracks().forEach(t => t.stop());
+    location.href = location.pathname;
+  }, 400);
 };
+
+/* ================= START: wznowienie sesji / link z zaproszeniem ================= */
+(function boot() {
+  const sess = LS.get('session', null);
+  const fresh = sess && Date.now() - sess.ts < 12 * 3600e3;
+  const resume = () => sess.role === 'coach' ? startCoach() : startAthlete(sess.room, sess.name);
+  if (params.has('wznow') || params.has('v')) history.replaceState(null, '', location.pathname + (params.get('pokoj') ? '?pokoj=' + params.get('pokoj') : ''));
+  if (params.get('pokoj') && !(fresh && sess.role === 'athlete' && sess.room === sanitizeCode(params.get('pokoj')) && params.has('wznow'))) {
+    return openJoin(sanitizeCode(params.get('pokoj')));
+  }
+  if (fresh) {
+    if (params.has('wznow')) { toast('Wznawiam sesję po aktualizacji…'); return resume(); }
+    const b = $('#btnResume');
+    b.textContent = sess.role === 'coach' ? `↻ Wznów sesję trenera (${curRoom().name})` : `↻ Wznów połączenie (pokój ${sess.room})`;
+    b.classList.remove('hidden'); b.onclick = resume;
+  } else if (sess) LS.del('session');
+})();
 </script>
 </body>
 </html>
