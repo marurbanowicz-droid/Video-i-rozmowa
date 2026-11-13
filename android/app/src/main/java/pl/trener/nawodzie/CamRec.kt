@@ -8,6 +8,7 @@ import android.view.Surface
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
@@ -48,9 +49,15 @@ object CamRec {
     private var pcm: PcmWriter? = null
     private var pendingRebind = false
     private var lastZoomKey = ""
+    private var sport: SportEffect? = null
+    private var appCtx: android.content.Context? = null
+    /** Aktualny zoom (czytany przez tryb Sport z innego wątku). */
+    @Volatile var curZoom = 1f; private set
+    val sportActive get() = sport != null
 
     fun bind(ctx: Context, lifecycleOwner: LifecycleOwner) {
         owner = lifecycleOwner
+        appCtx = ctx.applicationContext
         val f = ProcessCameraProvider.getInstance(ctx)
         f.addListener({
             try { provider = f.get(); rebind() } catch (e: Exception) { Log.e(TAG, "camera", e); Notifier.toast("Nie udało się uruchomić kamery") }
@@ -60,6 +67,7 @@ object CamRec {
     fun unbind() {
         try { recording?.stop() } catch (_: Exception) {}
         provider?.unbindAll()
+        sport?.processor?.release(); sport = null
         camera = null; preview = null; videoCapture = null; owner = null
         notifyChange()
     }
@@ -71,11 +79,13 @@ object CamRec {
         val o = owner ?: return@onMain
         try {
             p.unbindAll()
+            sport?.processor?.release(); sport = null
             val sel = CameraSelector.DEFAULT_BACK_CAMERA
             val info = try { p.getCameraInfo(sel) } catch (_: Exception) { null }
             val prevStabOk = info != null && Preview.getPreviewCapabilities(info).isStabilizationSupported
             val vidStabOk = info != null && Recorder.getVideoCapabilities(info).isStabilizationSupported
-            val want = Prefs.stab
+            val mode = Prefs.stabMode
+            val want = mode == "std"
             val (q, br) = when (Prefs.quality) {
                 "HD" -> Quality.HD to 6_000_000
                 "UHD" -> Quality.UHD to 40_000_000
@@ -94,9 +104,22 @@ object CamRec {
             val vc = vb.build()
             stabSupported = prevStabOk || vidStabOk
             stabActive = want && stabSupported
-            camera = p.bindToLifecycle(o, sel, pv, vc)
+            camera = if (mode == "sport") {
+                try {
+                    val eff = SportEffect.create(appCtx ?: (o as android.content.Context), info?.sensorRotationDegrees ?: 90)
+                    val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(eff).build()
+                    p.bindToLifecycle(o, sel, group).also { sport = eff }
+                } catch (e: Exception) {
+                    Log.e(TAG, "sport", e)
+                    sport?.processor?.release(); sport = null
+                    Notifier.toast("Tryb Sport niedostępny na tym telefonie – używam zwykłego obrazu")
+                    p.unbindAll()
+                    p.bindToLifecycle(o, sel, pv, vc)
+                }
+            } else p.bindToLifecycle(o, sel, pv, vc)
             lastZoomKey = ""
             camera?.cameraInfo?.zoomState?.observe(o) { zs ->
+                curZoom = zs.zoomRatio
                 val k = "${zs.minZoomRatio}-${zs.maxZoomRatio}"
                 if (k != lastZoomKey) { lastZoomKey = k; notifyChange() }
             }

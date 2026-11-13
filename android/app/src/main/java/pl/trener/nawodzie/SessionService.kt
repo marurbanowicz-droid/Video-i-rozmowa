@@ -66,6 +66,7 @@ class SessionService : LifecycleService() {
             startForeground(ID, n, type)
         } else startForeground(ID, n)
         acquireLocks()
+        Controls.start(this)
         if (coach) CamRec.bind(this, this)
         return START_NOT_STICKY
     }
@@ -116,6 +117,7 @@ class SessionService : LifecycleService() {
 
     override fun onDestroy() {
         Engine.removeUi(ui)
+        Controls.stop()
         running = false
         if (coach) CamRec.unbind()
         try { wl?.release() } catch (_: Exception) {}

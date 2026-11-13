@@ -57,6 +57,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
+    implementation("androidx.media:media:1.7.0")
 
     val camerax = "1.4.0"
     implementation("androidx.camera:camera-core:$camerax")

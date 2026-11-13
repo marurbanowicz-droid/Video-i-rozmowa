@@ -22,6 +22,7 @@ class App : Application() {
         Prefs.init(this)
         Engine.init(this)
         Notifier.init(this)
+        Controls.init(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(SessionService.CHANNEL, "Sesja treningowa", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(UpdateReceiver.CHANNEL, "Aktualizacje", NotificationManager.IMPORTANCE_DEFAULT))
@@ -71,9 +72,11 @@ object Notifier {
                 "back" -> ToneGenerator.TONE_PROP_BEEP2
                 "leave" -> ToneGenerator.TONE_PROP_NACK
                 "lost" -> ToneGenerator.TONE_SUP_ERROR
+                "ptt" -> ToneGenerator.TONE_PROP_BEEP
+                "ptt_off" -> ToneGenerator.TONE_PROP_PROMPT
                 else -> ToneGenerator.TONE_PROP_BEEP
             }
-            g.startTone(t, 450)
+            g.startTone(t, if (kind.startsWith("ptt")) 120 else 450)
         } catch (_: Exception) {}
     }
 
@@ -97,11 +100,20 @@ object AudioRouter {
     private var am: AudioManager? = null
     private var cb: AudioDeviceCallback? = null
     private var prevMode = AudioManager.MODE_NORMAL
+    private var focus: android.media.AudioFocusRequest? = null
 
     fun start(ctx: Context) {
         val a = ctx.getSystemService(AudioManager::class.java); am = a
         prevMode = a.mode
         a.mode = AudioManager.MODE_IN_COMMUNICATION
+        // głośność rozmowy na maksimum – głos na wodzie musi być dobrze słyszalny
+        try { a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0) } catch (_: Exception) {}
+        try {
+            val f = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build()).build()
+            a.requestAudioFocus(f); focus = f
+        } catch (_: Exception) {}
         apply()
         cb = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) { apply() }
@@ -113,6 +125,7 @@ object AudioRouter {
     fun stop() {
         val a = am ?: return
         cb?.let { a.unregisterAudioDeviceCallback(it) }; cb = null
+        focus?.let { try { a.abandonAudioFocusRequest(it) } catch (_: Exception) {} }; focus = null
         try {
             if (Build.VERSION.SDK_INT >= 31) a.clearCommunicationDevice()
             else { @Suppress("DEPRECATION") a.isSpeakerphoneOn = false; @Suppress("DEPRECATION") a.stopBluetoothSco() }
