@@ -38,6 +38,7 @@ object Prefs {
     val coachWind get() = sp.getBoolean("coach_wind", true)
     val athNoise get() = sp.getBoolean("ath_noise", true)
     val athWind get() = sp.getBoolean("ath_wind", true)
+    val crosstalk get() = sp.getBoolean("crosstalk", true)
     val quality: String get() = sp.getString("quality", "FHD") ?: "FHD"
     val stab get() = sp.getBoolean("stab", true)
     val kbps: Int get() = (sp.getString("kbps", "32") ?: "32").toIntOrNull() ?: 32

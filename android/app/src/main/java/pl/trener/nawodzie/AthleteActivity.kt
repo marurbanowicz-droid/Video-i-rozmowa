@@ -23,6 +23,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var muteBtn: MaterialButton
     private lateinit var spkBtn: MaterialButton
     private lateinit var dataTxt: TextView
+    private lateinit var hint: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +40,8 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
         root.addView(title, lp())
         root.addView(status, lp(top = dp(16)))
         root.addView(roster, lp(top = dp(12)))
+        hint = text("", 13f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
+        root.addView(hint, lp(top = dp(6)))
         root.addView(muteBtn, lp(top = dp(16)))
         root.addView(spkBtn, lp(top = dp(10)))
         root.addView(LinearLayout(this).apply {
@@ -72,7 +75,15 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
             text = (if (on) "🟢 " else "🔴 ") + name; isClickable = false; alpha = if (on) 1f else 0.6f
         }
         roster.addView(chip("Trener", Engine.athLink))
-        for (x in Engine.athRoster) roster.addView(chip(if (x.id == Prefs.cid) "${x.name} (Ty)" else x.name, x.on))
+        for (x in Engine.athRoster) {
+            val label = when {
+                x.id == Prefs.cid -> "${x.name} (Ty)"
+                Engine.athCross && x.id in Engine.meshUp -> "${x.name} 🔊"
+                else -> x.name
+            }
+            roster.addView(chip(label, x.on))
+        }
+        hint.text = if (Engine.athCross) "🔊 Słyszycie się nawzajem – ikona przy imieniu oznacza aktywne połączenie." else "Słyszysz tylko trenera."
         muteBtn.text = if (Engine.athMuted) "🔇 Mikrofon wyciszony" else "🎙 Mikrofon włączony"
         muteBtn.backgroundTintList = android.content.res.ColorStateList.valueOf(if (Engine.athMuted) col(R.color.card) else col(R.color.acc))
         muteBtn.setTextColor(if (Engine.athMuted) col(R.color.txt) else Color.parseColor("#04211F"))

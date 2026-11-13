@@ -62,7 +62,7 @@ object Engine {
     data class AthleteView(val cid: String, val name: String, val status: String, val muted: Boolean)
     @Volatile var athletesView: List<AthleteView> = emptyList(); private set
 
-    data class RosterItem(val id: String, val name: String, val on: Boolean)
+    data class RosterItem(val id: String, val name: String, val on: Boolean, val pid: String = "")
     @Volatile var athCode = ""; private set
     @Volatile var athName = ""; private set
     @Volatile var athRoomName = ""; private set
@@ -70,6 +70,9 @@ object Engine {
     @Volatile var athStatus = ""; private set
     @Volatile var athRoster: List<RosterItem> = emptyList(); private set
     @Volatile var athMuted = false; private set
+    /** Czy trener włączył „zawodnicy słyszą się nawzajem” i z kim jest aktywne połączenie. */
+    @Volatile var athCross = false; private set
+    @Volatile var meshUp: Set<String> = emptySet(); private set
 
     // ---------------- WebRTC ----------------
     private var factoryInitDone = false
@@ -91,6 +94,8 @@ object Engine {
         var closed = false
         var cid: String? = null
         val bytes = LongArray(2)
+        val created = System.currentTimeMillis()
+        var mesh = false
     }
     private val links = HashMap<String, Link>()
     private val closedBytes = LongArray(2)
@@ -119,6 +124,8 @@ object Engine {
     private var athBadSince = 0L
     private var athDataT = 0L
     private var athKbps = 32
+    /** Połączenia głosowe zawodnik ↔ zawodnik (każdy z każdym). Klucz: cid drugiego zawodnika. */
+    private val mesh = HashMap<String, Link>()
 
     private fun now() = System.currentTimeMillis()
     private fun rnd() = Prefs.genCode(12).lowercase()
@@ -143,7 +150,7 @@ object Engine {
         if (role != Role.NONE) return@execute
         role = Role.ATHLETE; resetStats()
         athCode = code; athName = name; athRoomName = ""; athLink = false; athEverLinked = false
-        athRosterMap = null; athRoster = emptyList(); athStatus = "Łączenie z serwerem…"; athMuted = false
+        athRosterMap = null; athRoster = emptyList(); athStatus = "Łączenie z serwerem…"; athMuted = false; athCross = false
         try { initRtc(Prefs.athNoise, Prefs.athWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); athStatus = "Błąd mikrofonu: ${e.message}" }
         ice = buildIce()
         connectSignal(newAthId())
@@ -162,7 +169,7 @@ object Engine {
         reconnectF?.cancel(false); reconnectF = null
         role = Role.NONE
         links.values.toList().forEach { closeLink(it) }
-        links.clear(); athletes.clear(); dataLinks.clear(); athMedia = null; athData = null
+        links.clear(); athletes.clear(); dataLinks.clear(); mesh.clear(); meshUp = emptySet(); athMedia = null; athData = null
         signal?.close(); signal = null; signalOpen = false
         val la = loopA; val lb = loopB; loopA = null; loopB = null
         la?.close(); lb?.close()
@@ -300,7 +307,10 @@ object Engine {
 
     private fun onSignal(type: String, src: String?, p: JSONObject?) {
         when (type) {
-            "OFFER" -> if (src != null && p != null && role == Role.COACH) onOffer(src, p)
+            "OFFER" -> if (src != null && p != null) {
+                if (role == Role.COACH) onOffer(src, p)
+                else if (role == Role.ATHLETE && p.optJSONObject("metadata")?.optBoolean("mesh") == true) onMeshOffer(src, p)
+            }
             "ANSWER" -> {
                 val l = links[p?.optString("connectionId")] ?: return
                 val sdp = p?.optJSONObject("sdp") ?: return
@@ -312,7 +322,10 @@ object Engine {
                 val ic = IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate"))
                 if (l.remoteSet) l.pc?.addIceCandidate(ic) else l.cands.add(ic)
             }
-            "EXPIRE" -> if (role == Role.ATHLETE && src == coachPeerId()) {
+            "EXPIRE" -> if (role == Role.ATHLETE && src != null && src != coachPeerId()) {
+                mesh.entries.filter { it.value.peer == src }.map { it.key to it.value }.forEach { (k, v) -> closeLink(v); mesh.remove(k) }
+                refreshMeshUp()
+            } else if (role == Role.ATHLETE && src == coachPeerId()) {
                 closeLink(athMedia); athMedia = null; closeLink(athData); athData = null
                 if (!athLink) { athStatus = "Trener jeszcze nie jest online – czekam…"; changed() }
             }
@@ -451,6 +464,11 @@ object Engine {
                 }
             }
             Role.ATHLETE -> {
+                if (l.mesh) {
+                    if (l.ice == IceConnectionState.FAILED || l.ice == IceConnectionState.CLOSED) dropMesh(l)
+                    if (up) applyBitrate(l.pc, athKbps)
+                    refreshMeshUp(); return
+                }
                 if (l === athMedia) {
                     when {
                         up -> { athBadSince = 0; setLink(true); applyBitrate(l.pc, athKbps) }
@@ -477,7 +495,8 @@ object Engine {
             Role.COACH -> if (l.type == "media") athletes.values.firstOrNull { it.media === l }?.let { goOffline(it) }
                           else { dataLinks.entries.removeAll { it.value === l }; closeLink(l) }
             Role.ATHLETE -> {
-                if (l === athMedia) { closeLink(l); athMedia = null; setLink(false) }
+                if (l.mesh) { dropMesh(l); refreshMeshUp() }
+                else if (l === athMedia) { closeLink(l); athMedia = null; setLink(false) }
                 else if (l === athData) { closeLink(l); athData = null }
             }
             else -> {}
@@ -584,8 +603,8 @@ object Engine {
     private fun rosterMsg(): JSONObject {
         val r = Prefs.currentRoom()
         val list = JSONArray()
-        athletes.values.forEach { list.put(JSONObject().put("id", it.cid).put("name", it.name).put("on", it.status == "online")) }
-        return JSONObject().put("t", "roster").put("room", r.name).put("code", r.code).put("list", list)
+        athletes.values.forEach { list.put(JSONObject().put("id", it.cid).put("name", it.name).put("on", it.status == "online").put("pid", it.media?.peer ?: "")) }
+        return JSONObject().put("t", "roster").put("room", r.name).put("code", r.code).put("cross", Prefs.crosstalk).put("list", list)
     }
 
     private fun broadcast(o: JSONObject) = dataLinks.values.forEach { dcSend(it, o) }
@@ -654,6 +673,7 @@ object Engine {
 
     private fun athWatchdog() {
         if (role != Role.ATHLETE) return
+        updateMesh()
         val m = athMedia
         if (signalOpen) {
             val dataOk = athData?.dc?.state() == DataChannel.State.OPEN
@@ -688,9 +708,10 @@ object Engine {
             "cfg" -> { athKbps = o.optInt("kbps", 32); applyBitrate(athMedia?.pc, athKbps) }
             "roster" -> {
                 athRoomName = o.optString("room")
+                athCross = o.optBoolean("cross", false)
                 val arr = o.optJSONArray("list") ?: JSONArray()
                 val next = LinkedHashMap<String, RosterItem>()
-                for (i in 0 until arr.length()) { val x = arr.getJSONObject(i); next[x.optString("id")] = RosterItem(x.optString("id"), x.optString("name"), x.optBoolean("on")) }
+                for (i in 0 until arr.length()) { val x = arr.getJSONObject(i); next[x.optString("id")] = RosterItem(x.optString("id"), x.optString("name"), x.optBoolean("on"), x.optString("pid")) }
                 val prev = athRosterMap
                 if (prev != null) {
                     for ((id, x) in next) {
@@ -702,7 +723,74 @@ object Engine {
                     for ((id, x) in prev) if (!next.containsKey(id) && x.on && id != Prefs.cid) Notifier.event("leave", "${x.name} rozłącza się")
                 }
                 athRosterMap = next; athRoster = next.values.toList()
+                updateMesh()
                 changed()
+            }
+        }
+    }
+
+    // ---------------- zawodnik ↔ zawodnik ----------------
+    private fun isUp(l: Link) = l.ice == IceConnectionState.CONNECTED || l.ice == IceConnectionState.COMPLETED
+
+    private fun dropMesh(l: Link) {
+        val k = mesh.entries.firstOrNull { it.value === l }?.key
+        if (k != null) mesh.remove(k)
+        closeLink(l)
+    }
+
+    private fun refreshMeshUp() {
+        val n = mesh.filter { isUp(it.value) }.keys.toSet()
+        if (n != meshUp) { meshUp = n; changed() }
+    }
+
+    /** Utrzymuje połączenia z pozostałymi zawodnikami. Dzwoni ten, kto ma „mniejszy” identyfikator. */
+    private fun updateMesh() {
+        if (role != Role.ATHLETE) return
+        val roster = athRosterMap ?: emptyMap()
+        val want = if (athCross) roster.values.filter { it.on && it.id != Prefs.cid && it.pid.isNotEmpty() } else emptyList()
+        val wantIds = want.map { it.id }.toSet()
+        for ((cid, l) in mesh.toMap()) {
+            val stale = !isUp(l) && System.currentTimeMillis() - l.created > 20_000
+            if (l.closed || cid !in wantIds || stale || l.ice == IceConnectionState.FAILED || l.ice == IceConnectionState.CLOSED) dropMesh(l)
+        }
+        if (signalOpen) for (x in want) {
+            val ex = mesh[x.id]
+            if (ex != null && ex.peer == x.pid) continue
+            if (ex != null && Prefs.cid < x.id) dropMesh(ex)
+            if (Prefs.cid < x.id && mesh[x.id] == null) meshCall(x)
+        }
+        refreshMeshUp()
+    }
+
+    private fun meshCall(x: RosterItem) {
+        val connId = "mc_" + rnd()
+        val md = athMeta().put("mesh", true)
+        val l = Link(connId, x.pid, "media", md).also { it.cid = x.id; it.mesh = true }
+        val pc = createPc(l) ?: return
+        mesh[x.id] = l
+        localTrack?.let { pc.addTrack(it, listOf("ath")) }
+        pc.createDataChannel(connId, DataChannel.Init().apply { ordered = true })?.let { attachDc(l, it) }
+        createSdp(pc, true) { offer ->
+            if (l.closed) return@createSdp
+            signal?.send("OFFER", l.peer, JSONObject().put("sdp", sdpJson(offer)).put("type", "media").put("connectionId", connId).put("metadata", md))
+        }
+    }
+
+    private fun onMeshOffer(src: String, p: JSONObject) {
+        val md = p.optJSONObject("metadata") ?: return
+        val cid = md.optString("cid")
+        if (cid.isEmpty() || !athCross) return
+        mesh[cid]?.let { dropMesh(it) }
+        val connId = p.optString("connectionId").ifEmpty { "x_" + rnd() }
+        val l = Link(connId, src, "media", md).also { it.cid = cid; it.mesh = true }
+        val pc = createPc(l) ?: return
+        mesh[cid] = l
+        val sdp = p.optJSONObject("sdp") ?: return
+        setRemote(pc, parseSdp(sdp)) {
+            l.remoteSet = true; flushCands(l)
+            localTrack?.let { pc.addTrack(it, listOf("ath")) }
+            createSdp(pc, false) { ans ->
+                signal?.send("ANSWER", src, JSONObject().put("sdp", sdpJson(ans)).put("type", "media").put("connectionId", connId))
             }
         }
     }
@@ -721,6 +809,7 @@ object Engine {
                 broadcast(JSONObject().put("t", "cfg").put("kbps", Prefs.kbps))
             }
             "turn_url" -> if (role != Role.NONE) ice = buildIce()
+            "crosstalk" -> broadcastRoster()
         }
     }
 

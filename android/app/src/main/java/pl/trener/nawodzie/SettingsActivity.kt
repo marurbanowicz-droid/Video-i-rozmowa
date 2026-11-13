@@ -64,6 +64,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         if (coach) {
             snd.sw("coach_noise", "Redukcja szumów", "Działa też na nagraniu – może przytłumić sygnał startu.", false)
             snd.sw("coach_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru i silnika.", true)
+            snd.sw("crosstalk", "Zawodnicy słyszą się nawzajem", "Każdy zawodnik łączy się z każdym – działa też z zawodnikami na stronie (iPhone).", true)
         } else {
             snd.sw("ath_noise", "Redukcja szumów", null, true)
             snd.sw("ath_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru.", true)
