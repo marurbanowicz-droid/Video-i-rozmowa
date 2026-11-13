@@ -40,7 +40,19 @@ object Prefs {
     val athWind get() = sp.getBoolean("ath_wind", true)
     val crosstalk get() = sp.getBoolean("crosstalk", true)
     val quality: String get() = sp.getString("quality", "FHD") ?: "FHD"
-    val stab get() = sp.getBoolean("stab", true)
+    /** off | std (systemowa) | sport (duże kadrowanie + żyroskop) */
+    val stabMode: String get() = sp.getString("stab_mode", null) ?: if (sp.getBoolean("stab", true)) "std" else "off"
+    val sportCrop: Float get() = (sp.getString("sport_crop", "1.6") ?: "1.6").toFloatOrNull() ?: 1.6f
+    val sportInvH get() = sp.getBoolean("sport_inv_h", false)
+    val sportInvV get() = sp.getBoolean("sport_inv_v", false)
+    val sportInvRoll get() = sp.getBoolean("sport_inv_roll", false)
+    /** open (rozmowa ciągła) | ptt (naciśnij, aby mówić) */
+    val talkMode: String get() = sp.getString("talk_mode", "open") ?: "open"
+    val headsetAction: String get() = sp.getString("headset_action", "mute_all") ?: "mute_all"
+    fun volAction(up: Boolean, coach: Boolean): String =
+        sp.getString(if (up) "vol_up" else "vol_down", null) ?: if (up) "mute_all" else if (coach) "record" else "volume"
+    /** Wzmocnienie odbieranego głosu (WebRTC: 0–10). */
+    val gain: Double get() = (sp.getString("gain", "3") ?: "3").toDoubleOrNull() ?: 3.0
     val kbps: Int get() = (sp.getString("kbps", "32") ?: "32").toIntOrNull() ?: 32
     val turnUrl: String get() = (sp.getString("turn_url", "") ?: "").trim()
     val webUrl: String get() = (sp.getString("web_url", BuildConfig.WEB_URL) ?: BuildConfig.WEB_URL).trim().ifEmpty { BuildConfig.WEB_URL }

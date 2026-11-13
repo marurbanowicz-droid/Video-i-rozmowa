@@ -53,6 +53,10 @@ object Engine {
     @Volatile var role = Role.NONE; private set
     @Volatile var signalOpen = false; private set
     @Volatile var micOn = true; private set
+    /** Wyciszenie wszystkiego: nic nie wysyłamy i nic nie słychać. */
+    @Volatile var fullMute = false; private set
+    /** Push-to-talk: czy właśnie mówimy. */
+    @Volatile var pttActive = false; private set
     @Volatile var bytesSent = 0L; private set
     @Volatile var bytesRecv = 0L; private set
     @Volatile var sessionStart = 0L; private set
@@ -96,6 +100,7 @@ object Engine {
         val bytes = LongArray(2)
         val created = System.currentTimeMillis()
         var mesh = false
+        var remote: AudioTrack? = null
     }
     private val links = HashMap<String, Link>()
     private val closedBytes = LongArray(2)
@@ -135,7 +140,7 @@ object Engine {
     // =====================================================================
     fun startCoach() = exec.execute {
         if (role != Role.NONE) return@execute
-        role = Role.COACH; micOn = true; resetStats()
+        role = Role.COACH; micOn = true; fullMute = false; pttActive = false; resetStats()
         try { initRtc(Prefs.coachNoise, Prefs.coachWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); Notifier.toast("Błąd audio: ${e.message}") }
         startLoopback()
         ice = buildIce()
@@ -148,7 +153,7 @@ object Engine {
 
     fun startAthlete(code: String, name: String) = exec.execute {
         if (role != Role.NONE) return@execute
-        role = Role.ATHLETE; resetStats()
+        role = Role.ATHLETE; fullMute = false; pttActive = false; resetStats()
         athCode = code; athName = name; athRoomName = ""; athLink = false; athEverLinked = false
         athRosterMap = null; athRoster = emptyList(); athStatus = "Łączenie z serwerem…"; athMuted = false; athCross = false
         try { initRtc(Prefs.athNoise, Prefs.athWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); athStatus = "Błąd mikrofonu: ${e.message}" }
@@ -167,7 +172,7 @@ object Engine {
     private fun teardown() {
         timers.forEach { it.cancel(false) }; timers.clear()
         reconnectF?.cancel(false); reconnectF = null
-        role = Role.NONE
+        role = Role.NONE; fullMute = false; pttActive = false
         links.values.toList().forEach { closeLink(it) }
         links.clear(); athletes.clear(); dataLinks.clear(); mesh.clear(); meshUp = emptySet(); athMedia = null; athData = null
         signal?.close(); signal = null; signalOpen = false
@@ -203,11 +208,11 @@ object Engine {
         val mc = MediaConstraints()
         mc.mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
         mc.mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", ns.toString()))
-        mc.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", (role == Role.ATHLETE).toString()))
+        mc.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
         mc.mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", wind.toString()))
         val src = f.createAudioSource(mc)
         val tr = f.createAudioTrack("mic" + System.nanoTime(), src)
-        tr.setEnabled(if (role == Role.ATHLETE) !athMuted else micOn)
+        tr.setEnabled(localEnabled())
         val oldT = localTrack; val oldS = audioSource
         localTrack = tr; audioSource = src
         val pcs = links.values.mapNotNull { it.pc } + listOfNotNull(loopA)
@@ -517,10 +522,33 @@ object Engine {
     }
 
     private fun onRemoteTrack(l: Link, t: MediaStreamTrack?) {
-        if (role != Role.COACH || t !is AudioTrack) return
-        val a = athletes.values.firstOrNull { it.media === l } ?: return
-        a.remote = t; t.setEnabled(!a.muted)
+        if (t !is AudioTrack) return
+        l.remote = t
+        if (role == Role.COACH) athletes.values.firstOrNull { it.media === l }?.remote = t
+        applyRemote()
     }
+
+    // ---------------- głośność, wyciszenia, push-to-talk ----------------
+    private fun localEnabled(): Boolean = !fullMute && when {
+        Prefs.talkMode == "ptt" -> pttActive
+        role == Role.ATHLETE -> !athMuted
+        else -> micOn
+    }
+    private fun applyLocal() { localTrack?.setEnabled(localEnabled()) }
+    private fun applyRemote() {
+        val g = Prefs.gain
+        for (l in links.values) {
+            val t = l.remote ?: continue
+            val muted = role == Role.COACH && athletes.values.firstOrNull { it.media === l }?.muted == true
+            try { t.setEnabled(!fullMute && !muted); t.setVolume(g) } catch (_: Exception) {}
+        }
+    }
+    fun toggleFullMute() = exec.execute {
+        fullMute = !fullMute; applyLocal(); applyRemote(); changed()
+        Notifier.beep(if (fullMute) "leave" else "join")
+        Notifier.toast(if (fullMute) "Wyciszono wszystko (mikrofon i dźwięk)" else "Dźwięk przywrócony")
+    }
+    fun setPtt(on: Boolean) = exec.execute { if (pttActive != on) { pttActive = on; applyLocal(); changed() } }
 
     // =====================================================================
     // TRENER
@@ -615,10 +643,10 @@ object Engine {
     }
 
     // ---- akcje trenera wywoływane z ekranu ----
-    fun setMic(on: Boolean) = exec.execute { micOn = on; localTrack?.setEnabled(on); changed() }
+    fun setMic(on: Boolean) = exec.execute { micOn = on; applyLocal(); changed() }
     fun toggleAthleteMute(cid: String) = exec.execute {
         val a = athletes[cid] ?: return@execute
-        a.muted = !a.muted; a.remote?.setEnabled(!a.muted)
+        a.muted = !a.muted; applyRemote()
         snapshot(); changed()
         Notifier.toast(if (a.muted) "${a.name} wyciszony(a) u Ciebie" else "${a.name} słyszalny(a)")
     }
@@ -795,7 +823,7 @@ object Engine {
         }
     }
 
-    fun setAthMuted(m: Boolean) = exec.execute { athMuted = m; localTrack?.setEnabled(!m); changed() }
+    fun setAthMuted(m: Boolean) = exec.execute { athMuted = m; applyLocal(); changed() }
 
     // =====================================================================
     // USTAWIENIA, STATYSTYKI
@@ -810,6 +838,8 @@ object Engine {
             }
             "turn_url" -> if (role != Role.NONE) ice = buildIce()
             "crosstalk" -> broadcastRoster()
+            "talk_mode" -> { pttActive = false; applyLocal(); changed() }
+            "gain" -> applyRemote()
         }
     }
 

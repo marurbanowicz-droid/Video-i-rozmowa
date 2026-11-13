@@ -3,7 +3,10 @@ package pl.trener.nawodzie
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.annotation.SuppressLint
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
@@ -24,7 +27,11 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var spkBtn: MaterialButton
     private lateinit var dataTxt: TextView
     private lateinit var hint: TextView
+    private lateinit var muteAll: MaterialButton
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = Controls.dispatch(event) || super.dispatchKeyEvent(event)
+
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -34,7 +41,17 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
             gravity = Gravity.CENTER; background = roundBg(col(R.color.card), dp(18).toFloat()); setPadding(dp(16), dp(20), dp(16), dp(20))
         }
         roster = ChipGroup(this)
-        muteBtn = button("🎙 Mikrofon włączony", "primary") { Engine.setAthMuted(!Engine.athMuted) }
+        muteBtn = button("Mikrofon włączony", "primary") { if (Prefs.talkMode != "ptt") Engine.setAthMuted(!Engine.athMuted) }
+        muteBtn.minHeight = dp(84)
+        muteBtn.setOnTouchListener { v, e ->
+            if (Prefs.talkMode != "ptt") return@setOnTouchListener false
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { Engine.setPtt(true); Notifier.beep("ptt"); v.isPressed = true }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { Engine.setPtt(false); Notifier.beep("ptt_off"); v.isPressed = false }
+            }
+            true
+        }
+        muteAll = button("Wycisz wszystko") { Engine.toggleFullMute() }
         spkBtn = button("") { Prefs.speaker = !Prefs.speaker; AudioRouter.apply(); refresh() }
         dataTxt = text("", 13f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
         root.addView(title, lp())
@@ -44,6 +61,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
         root.addView(hint, lp(top = dp(6)))
         root.addView(muteBtn, lp(top = dp(16)))
         root.addView(spkBtn, lp(top = dp(10)))
+        root.addView(muteAll, lp(top = dp(10)))
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(button("⚙ Ustawienia") { startActivity(Intent(this@AthleteActivity, SettingsActivity::class.java).putExtra("coach", false)) },
@@ -84,10 +102,23 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
             roster.addView(chip(label, x.on))
         }
         hint.text = if (Engine.athCross) "🔊 Słyszycie się nawzajem – ikona przy imieniu oznacza aktywne połączenie." else "Słyszysz tylko trenera."
-        muteBtn.text = if (Engine.athMuted) "🔇 Mikrofon wyciszony" else "🎙 Mikrofon włączony"
-        muteBtn.backgroundTintList = android.content.res.ColorStateList.valueOf(if (Engine.athMuted) col(R.color.card) else col(R.color.acc))
-        muteBtn.setTextColor(if (Engine.athMuted) col(R.color.txt) else Color.parseColor("#04211F"))
-        spkBtn.text = if (Prefs.speaker) "🔊 Dźwięk: głośnik" else "🎧 Dźwięk: słuchawki"
+        val ptt = Prefs.talkMode == "ptt"
+        val talking = !Engine.fullMute && (if (ptt) Engine.pttActive else !Engine.athMuted)
+        muteBtn.setIconResource(if (talking) R.drawable.ic_mic else R.drawable.ic_mic_off)
+        muteBtn.text = when {
+            Engine.fullMute -> "Wyciszono wszystko"
+            ptt -> if (Engine.pttActive) "MÓWISZ…" else "Przytrzymaj, aby mówić"
+            Engine.athMuted -> "Mikrofon wyciszony"
+            else -> "Mikrofon włączony"
+        }
+        muteBtn.backgroundTintList = android.content.res.ColorStateList.valueOf(if (talking) col(R.color.acc) else col(R.color.card))
+        muteBtn.setTextColor(if (talking) Color.parseColor("#04211F") else col(R.color.txt))
+        muteBtn.iconTint = android.content.res.ColorStateList.valueOf(if (talking) Color.parseColor("#04211F") else col(R.color.txt))
+        muteAll.text = if (Engine.fullMute) "Przywróć dźwięk" else "Wycisz wszystko (mikrofon i dźwięk)"
+        muteAll.setIconResource(if (Engine.fullMute) R.drawable.ic_volume_up else R.drawable.ic_volume_off)
+        muteAll.backgroundTintList = android.content.res.ColorStateList.valueOf(if (Engine.fullMute) Color.parseColor("#E6FF3B30") else col(R.color.card))
+        spkBtn.text = if (Prefs.speaker) "Dźwięk: głośnik" else "Dźwięk: słuchawki"
+        spkBtn.setIconResource(if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
         val tot = Engine.bytesSent + Engine.bytesRecv
         dataTxt.text = "Dane w tej sesji: ${fmtBytes(tot)} (wysłane ${fmtBytes(Engine.bytesSent)}, odebrane ${fmtBytes(Engine.bytesRecv)})"
         dataTxt.visibility = View.VISIBLE

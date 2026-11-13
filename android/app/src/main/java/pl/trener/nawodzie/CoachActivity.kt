@@ -13,8 +13,11 @@ import android.provider.MediaStore
 import android.text.InputFilter
 import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -36,9 +39,10 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var statusPill: TextView
     private lateinit var dataTxt: TextView
     private lateinit var qualityPill: TextView
-    private lateinit var stabBtn: ImageButton
+    private lateinit var stabPill: TextView
     private lateinit var noiseBtn: ImageButton
     private lateinit var recInfo: TextView
+    private lateinit var muteBanner: TextView
     private lateinit var athList: LinearLayout
     private lateinit var presets: LinearLayout
     private lateinit var dial: ZoomDial
@@ -46,11 +50,13 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var spkBtn: ImageButton
     private lateinit var shutter: ShutterButton
     private var rangeKey = ""
+    private var landscape = false
     private val ticker = object : Runnable { override fun run() { updateRecTime(); mainHandler.postDelayed(this, 500) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         buildUi()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { moveTaskToBack(true); Notifier.toast("Sesja działa w tle. Zakończysz ją w ustawieniach lub w powiadomieniu.") }
@@ -78,7 +84,16 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         CamRec.setRotation(rot())
+        val land = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (land != landscape) {
+            landscape = land
+            buildUi(); rangeKey = ""
+            CamRec.setSurface(preview.surfaceProvider)
+            syncZoom(); refresh()
+        }
     }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = Controls.dispatch(event) || super.dispatchKeyEvent(event)
 
     @Suppress("DEPRECATION")
     private fun rot(): Int = windowManager.defaultDisplay.rotation
@@ -104,7 +119,11 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         background = roundBg(glass, dp(16).toFloat()); setPadding(dp(12), dp(7), dp(12), dp(7)); maxLines = 1
     }
 
-    private fun gap(w: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(w), 1) }
+    private fun gap(w: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(w), dp(w)) }
+    private fun cell(v: View) = FrameLayout(this).apply {
+        (v.parent as? ViewGroup)?.removeView(v)
+        addView(v, FrameLayout.LayoutParams(v.layoutParams?.width ?: -2, v.layoutParams?.height ?: -2, Gravity.CENTER))
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildUi() {
@@ -116,61 +135,105 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         })
         preview.setOnTouchListener { _, e -> scale.onTouchEvent(e); true }
 
-        // ---- górny pasek: ustawienia | jakość, stabilizacja, szumy | pokój ----
+        // ---- górny pasek ----
         qualityPill = pillText("FHD").apply { setOnClickListener { qualityMenu(it) } }
-        stabBtn = iconBtn(R.drawable.ic_stab, 40) { toggleStab() }
-        noiseBtn = iconBtn(R.drawable.ic_noise, 40) { toggleNoise() }
+        stabPill = pillText("STAB").apply {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_stab, 0, 0, 0); compoundDrawablePadding = dp(6)
+            setOnClickListener { stabMenu(it) }
+        }
+        noiseBtn = iconBtn(R.drawable.ic_noise, 38) { toggleNoise() }
         statusPill = pillText("").apply {
             setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_group, 0, 0, 0); compoundDrawablePadding = dp(6)
             setOnClickListener { roomsDialog() }
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(30), dp(10), dp(10))
+            setPadding(dp(10), dp(if (landscape) 10 else 30), dp(if (landscape) 110 else 10), dp(10))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#AA000000"), Color.TRANSPARENT))
-            addView(iconBtn(R.drawable.ic_settings, 40) { openSettings() })
+            addView(iconBtn(R.drawable.ic_settings, 38) { openSettings() })
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(qualityPill); addView(gap(8)); addView(stabBtn); addView(gap(8)); addView(noiseBtn)
+            addView(qualityPill); addView(gap(8)); addView(stabPill); addView(gap(8)); addView(noiseBtn)
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             addView(statusPill)
         }
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        val topH = if (landscape) 62 else 84
 
         recInfo = text("", 15f, bold = true).apply {
             background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(12), dp(4), dp(12), dp(4)); visibility = View.GONE
         }
-        root.addView(recInfo, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(84) })
+        root.addView(recInfo, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(topH) })
+        muteBanner = text("WYCISZONO WSZYSTKO – dotknij, aby przywrócić", 14f, bold = true).apply {
+            background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(14), dp(8), dp(14), dp(8)); visibility = View.GONE
+            setOnClickListener { Engine.toggleFullMute() }
+        }
+        root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(topH + 34) })
         dataTxt = text("", 11f, Color.parseColor("#CCFFFFFF")).apply { setShadowLayer(4f, 0f, 1f, Color.BLACK) }
-        root.addView(dataTxt, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = dp(80); rightMargin = dp(14) })
+        root.addView(dataTxt, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = dp(topH - 4); rightMargin = dp(if (landscape) 110 else 14) })
 
         athList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(athList) },
-            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { topMargin = dp(84); leftMargin = dp(10); bottomMargin = dp(260) })
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+                topMargin = dp(topH); leftMargin = dp(10); bottomMargin = dp(if (landscape) 120 else 260)
+            })
 
-        // ---- dół: presety zoomu, pokrętło, przyciski ----
+        // ---- zoom i przyciski ----
         presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         dial = ZoomDial(this).apply { onZoom = { z -> CamRec.setZoom(z); highlightPreset() } }
-        micBtn = iconBtn(R.drawable.ic_mic, 52) { Engine.setMic(!Engine.micOn); Notifier.toast(if (!Engine.micOn) "Zawodnicy Cię słyszą" else "Mikrofon do zawodników wyciszony (nagranie nadal ma dźwięk)") }
+        micBtn = iconBtn(R.drawable.ic_mic, 52) { if (Prefs.talkMode != "ptt") Controls.run("mute_mic", true, true) }
+        micBtn.setOnTouchListener { v, e ->
+            if (Prefs.talkMode != "ptt") return@setOnTouchListener false
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { Engine.setPtt(true); Notifier.beep("ptt"); v.isPressed = true }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { Engine.setPtt(false); Notifier.beep("ptt_off"); v.isPressed = false }
+            }
+            true
+        }
+        micBtn.setOnLongClickListener { if (Prefs.talkMode != "ptt") { Engine.toggleFullMute(); true } else false }
         spkBtn = iconBtn(R.drawable.ic_volume_up, 52) { Prefs.speaker = !Prefs.speaker; AudioRouter.apply(); refresh(); Notifier.toast(if (Prefs.speaker) "Dźwięk z głośnika" else "Dźwięk w słuchawkach (jeśli podłączone)") }
         shutter = ShutterButton(this).apply { setOnClickListener { toggleRec() } }
-        val ctrls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            fun cell(v: View) = FrameLayout(context).apply { addView(v, FrameLayout.LayoutParams(v.layoutParams?.width ?: -2, v.layoutParams?.height ?: -2, Gravity.CENTER)) }
-            addView(cell(iconBtn(R.drawable.ic_gallery, 48) { openGallery() }), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(cell(micBtn), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(shutter, LinearLayout.LayoutParams(dp(80), dp(80)))
-            addView(cell(spkBtn), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(cell(iconBtn(R.drawable.ic_person_add, 48) { inviteDialog() }), LinearLayout.LayoutParams(0, -2, 1f))
+        val gallery = iconBtn(R.drawable.ic_gallery, 46) { openGallery() }
+        val invite = iconBtn(R.drawable.ic_person_add, 46) { inviteDialog() }
+
+        if (!landscape) {
+            val ctrls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(cell(gallery), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(cell(micBtn), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(shutter, LinearLayout.LayoutParams(dp(80), dp(80)))
+                addView(cell(spkBtn), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(cell(invite), LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            val bottom = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(24), dp(8), dp(22))
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
+                addView(presets, lp())
+                addView(dial, lp(h = dp(78), top = dp(4)))
+                addView(ctrls, lp(top = dp(6)))
+            }
+            root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        } else {
+            // poziomo: przyciski w kolumnie po prawej (jak w aparacie), zoom w wąskim pasku na dole
+            val side = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+                background = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
+                fun sp() = View(context).apply { layoutParams = LinearLayout.LayoutParams(1, 0, 1f) }
+                addView(invite); addView(sp()); addView(spkBtn); addView(sp())
+                addView(shutter, LinearLayout.LayoutParams(dp(76), dp(76))); addView(sp())
+                addView(micBtn); addView(sp()); addView(gallery)
+            }
+            root.addView(side, FrameLayout.LayoutParams(dp(100), -1, Gravity.END))
+            val bottom = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#AA000000"), Color.TRANSPARENT))
+                addView(presets, LinearLayout.LayoutParams(-2, -2))
+                addView(dial, LinearLayout.LayoutParams(0, dp(70), 1f).apply { marginStart = dp(8) })
+            }
+            root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { rightMargin = dp(100) })
         }
-        val bottom = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(24), dp(8), dp(22))
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
-            addView(presets, lp())
-            addView(dial, lp(h = dp(78), top = dp(4)))
-            addView(ctrls, lp(top = dp(6)))
-        }
-        root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         setContentView(root)
     }
 
@@ -194,7 +257,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(glass) }
                     setOnClickListener { applyZoom(v) }
                 }
-                presets.addView(t, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(5); marginEnd = dp(5) })
+                presets.addView(t, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(4); marginEnd = dp(4) })
             }
         }
         dial.setZoomValue(CamRec.zoomRatio())
@@ -229,18 +292,28 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         pm.show()
     }
 
-    private fun toggleStab() {
-        if (CamRec.recording != null) { Notifier.toast("Zatrzymaj nagrywanie, aby przełączyć stabilizację"); return }
-        val on = !Prefs.stab
-        Prefs.sp.edit().putBoolean("stab", on).apply()
-        CamRec.rebind()
-        mainHandler.postDelayed({
-            Notifier.toast(when {
-                !on -> "Stabilizacja wyłączona"
-                CamRec.stabSupported -> "Stabilizacja włączona"
-                else -> "Ten telefon nie udostępnia stabilizacji dla aplikacji"
-            }); refresh()
-        }, 700)
+    private fun stabMenu(anchor: View) {
+        if (CamRec.recording != null) { Notifier.toast("Zatrzymaj nagrywanie, aby zmienić stabilizację"); return }
+        val pm = PopupMenu(this, anchor)
+        val opts = listOf("off" to "Wyłączona", "std" to "Standardowa", "sport" to "Sport – duże kadrowanie")
+        opts.forEachIndexed { i, (_, label) -> pm.menu.add(0, i, i, label).isCheckable = true }
+        pm.menu.setGroupCheckable(0, true, true)
+        pm.menu.getItem(opts.indexOfFirst { it.first == Prefs.stabMode }.coerceAtLeast(0)).isChecked = true
+        pm.setOnMenuItemClickListener { item ->
+            val m = opts[item.itemId].first
+            Prefs.sp.edit().putString("stab_mode", m).apply()
+            CamRec.rebind()
+            mainHandler.postDelayed({
+                Notifier.toast(when {
+                    m == "off" -> "Stabilizacja wyłączona"
+                    m == "sport" -> "Tryb Sport: obraz przycięty, mocna korekta wahań"
+                    CamRec.stabSupported -> "Stabilizacja standardowa włączona"
+                    else -> "Ten telefon nie udostępnia standardowej stabilizacji – spróbuj trybu Sport"
+                }); refresh()
+            }, 800)
+            true
+        }
+        pm.show()
     }
 
     private fun toggleNoise() {
@@ -270,11 +343,22 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         statusPill.setTextColor(if (Engine.signalOpen) Color.WHITE else ACCENT)
         dataTxt.text = "${r.code} · ${fmtBytes(Engine.bytesSent + Engine.bytesRecv)}" + if (!Engine.signalOpen) " · łączenie…" else ""
         qualityPill.text = when (Prefs.quality) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
-        stabBtn.state(Prefs.stab && (CamRec.camera == null || CamRec.stabSupported))
+        val sm = Prefs.stabMode
+        stabPill.text = when (sm) { "sport" -> "SPORT"; "std" -> "STAB"; else -> "OFF" }
+        val stabOn = sm == "sport" || (sm == "std" && (CamRec.camera == null || CamRec.stabSupported))
+        stabPill.setTextColor(if (stabOn) ACCENT else Color.WHITE)
+        stabPill.compoundDrawablesRelative[0]?.mutate()?.setTint(if (stabOn) ACCENT else Color.WHITE)
         noiseBtn.state(Prefs.coachNoise)
-        micBtn.setImageResource(if (Engine.micOn) R.drawable.ic_mic else R.drawable.ic_mic_off)
-        micBtn.state(true, warn = !Engine.micOn); if (Engine.micOn) micBtn.imageTintList = ColorStateList.valueOf(Color.WHITE)
-        spkBtn.setImageResource(if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
+        val ptt = Prefs.talkMode == "ptt"
+        val talking = if (ptt) Engine.pttActive else Engine.micOn
+        micBtn.setImageResource(if (talking && !Engine.fullMute) R.drawable.ic_mic else R.drawable.ic_mic_off)
+        when {
+            Engine.fullMute -> micBtn.state(true, warn = true)
+            ptt -> { micBtn.state(Engine.pttActive); if (!Engine.pttActive) micBtn.alpha = 1f }
+            else -> { micBtn.state(true, warn = !Engine.micOn); if (Engine.micOn) micBtn.imageTintList = ColorStateList.valueOf(Color.WHITE) }
+        }
+        muteBanner.visibility = if (Engine.fullMute) View.VISIBLE else View.GONE
+        spkBtn.setImageResource(if (Engine.fullMute) R.drawable.ic_volume_off else if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
         shutter.recording = CamRec.recording != null
         // zawodnicy – każdy z osobnym wyciszeniem
         athList.removeAllViews()
