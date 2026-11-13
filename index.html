@@ -116,6 +116,7 @@
   <button class="big primary hidden" id="btnResume">↻ Wznów sesję</button>
   <button class="big" id="goCoach">Jestem trenerem</button>
   <button class="big" id="goAthlete">Jestem zawodnikiem</button>
+  <a class="big android-only hidden" id="getApp" style="text-decoration:none;color:inherit" href="https://github.com/marurbanowicz-droid/Video-i-rozmowa/releases/latest">📲 Pobierz aplikację na Androida</a>
   <span class="ver" id="homeVer"></span>
 </section>
 
@@ -127,6 +128,7 @@
   <label class="lbl" for="joinCode">Kod pokoju (od trenera)</label>
   <input type="text" id="joinCode" class="code" maxlength="8" placeholder="ABCD">
   <button class="big primary" id="joinBtn">Połącz z trenerem</button>
+  <a class="big android-only hidden" id="openInApp" style="text-decoration:none;color:inherit">📲 Otwórz w aplikacji</a>
   <button class="big" id="joinBack">Wróć</button>
 </section>
 
@@ -265,7 +267,7 @@
 <script>
 'use strict';
 /* ================= WERSJA I KONFIGURACJA ================= */
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const CONFIG = {
   peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
@@ -468,7 +470,17 @@ function doUpdate() {
 $('#btnCheckUpd').onclick = () => checkUpdate(true);
 $('#btnDoUpd').onclick = doUpdate;
 $('#btnUpdBadge').onclick = () => openSettings();
-$('#verTxt').textContent = APP_VERSION; $('#homeVer').textContent = 'wersja ' + APP_VERSION;
+$('#verTxt').textContent = APP_VERSION;
+/* ---------- Android: aplikacja natywna ---------- */
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const RELEASES = 'https://github.com/marurbanowicz-droid/Video-i-rozmowa/releases/latest';
+if (IS_ANDROID) document.querySelectorAll('.android-only').forEach(e => e.classList.remove('hidden'));
+function updOpenInApp() {
+  const code = sanitizeCode($('#joinCode').value);
+  let q = 'pokoj=' + encodeURIComponent(code); if (LS.get('turnUrl', '')) q += '&turn=' + encodeURIComponent(LS.get('turnUrl', ''));
+  $('#openInApp').href = `intent://join?${q}#Intent;scheme=trenernawodzie;package=pl.trener.nawodzie;S.browser_fallback_url=${encodeURIComponent(RELEASES)};end`;
+}
+$('#joinCode').addEventListener('input', updOpenInApp); $('#homeVer').textContent = 'wersja ' + APP_VERSION;
 
 /* ================= EKRAN STARTOWY ================= */
 $('#goCoach').onclick = () => startCoach();
@@ -477,7 +489,7 @@ $('#joinBack').onclick = () => show('home');
 function openJoin(code) {
   $('#joinName').value = LS.get('athName', '');
   $('#joinCode').value = code || LS.get('lastRoom', '');
-  show('join');
+  show('join'); if (typeof updOpenInApp === 'function') updOpenInApp();
   ($('#joinName').value ? $('#joinCode') : $('#joinName')).focus();
 }
 $('#joinBtn').onclick = () => {
@@ -1068,7 +1080,7 @@ function athConnectPeer() {
 function athConnectData() {
   const p = ath.peer; if (!p || !p.open || p.disconnected) return;
   if (ath.conn) try { ath.conn.close(); } catch {}
-  const c = ath.conn = p.connect(coachId(), { reliable: true, metadata: { cid: ath.cid, name: ath.name } });
+  const c = ath.conn = p.connect(coachId(), { reliable: true, serialization: 'json', metadata: { cid: ath.cid, name: ath.name } });
   ath.connT = Date.now();
   c.on('data', onCoachData);
   c.on('close', () => { if (ath.conn === c) ath.conn = null; });
