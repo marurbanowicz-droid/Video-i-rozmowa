@@ -56,6 +56,7 @@ class SessionService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             "STOP" -> { endSession(this); return START_NOT_STICKY }
+            "QUIT" -> { AppExit.quit(this); return START_NOT_STICKY }
             "REC" -> { if (CamRec.recording != null) CamRec.stopRec() else CamRec.startRec(this); return START_NOT_STICKY }
             "REFRESH" -> { updateNotification(); return START_NOT_STICKY }
         }
@@ -103,6 +104,7 @@ class SessionService : LifecycleService() {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (coach) b.addAction(0, if (CamRec.recording != null) "⏹ Stop nagrywania" else "⏺ Nagrywaj", pi("REC", 1))
         b.addAction(0, "Zakończ", pi("STOP", 2))
+        b.addAction(0, "Zamknij aplikację", pi("QUIT", 3))
         return b.build()
     }
 

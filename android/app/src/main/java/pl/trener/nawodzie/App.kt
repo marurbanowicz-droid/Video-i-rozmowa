@@ -166,3 +166,39 @@ object AudioRouter {
         } catch (_: Exception) {}
     }
 }
+
+/**
+ * Trwałe zamknięcie aplikacji: kończy sesję (zapisuje nagranie), wyłącza czuwanie i wszystkie powiadomienia.
+ * Czuwanie wróci dopiero, gdy użytkownik sam otworzy aplikację.
+ */
+object AppExit {
+    fun quit(ctx: android.content.Context, activity: android.app.Activity? = null) {
+        val app = ctx.applicationContext
+        Prefs.standbyPaused = true
+        val wasRec = CamRec.recording != null
+        if (Engine.role != Engine.Role.NONE) SessionService.endSession(app)
+        StandbyService.stop(app)
+        activity?.finishAndRemoveTask()
+        Notifier.toast(if (wasRec) "Zapisuję nagranie i zamykam aplikację…" else "Aplikacja zamknięta")
+        val start = System.currentTimeMillis()
+        // czekamy, aż nagranie zostanie zapisane w Galerii (maks. 5 min), dopiero potem zamykamy proces
+        val finish = object : Runnable {
+            override fun run() {
+                if ((CamRec.muxing || CamRec.recording != null) && System.currentTimeMillis() - start < 300_000) { mainHandler.postDelayed(this, 1000); return }
+                try { app.getSystemService(android.app.NotificationManager::class.java).cancelAll() } catch (_: Exception) {}
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+        mainHandler.postDelayed(finish, if (wasRec) 4000 else 2500)
+    }
+
+    /** Okno z pytaniem przed zamknięciem. */
+    fun confirm(activity: android.app.Activity) {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
+            .setTitle("Zamknąć aplikację?")
+            .setMessage((if (Engine.role != Engine.Role.NONE) "Sesja zostanie zakończona" + (if (CamRec.recording != null) " (nagranie zostanie zapisane)" else "") + ". " else "") +
+                "Aplikacja przestanie działać w tle i zniknie jej powiadomienie. Powiadomienia o łączeniu i wywołania od trenera nie będą docierać, dopóki znów jej nie otworzysz.")
+            .setPositiveButton("Zamknij") { _, _ -> quit(activity, activity) }
+            .setNegativeButton("Anuluj", null).show()
+    }
+}

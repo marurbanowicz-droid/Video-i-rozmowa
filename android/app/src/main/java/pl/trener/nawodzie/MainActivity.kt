@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Prefs.standbyPaused = false   // użytkownik otworzył aplikację – czuwanie może wrócić
         buildUi()
         handleIntent(intent)
         Prefs.sp.getString("last_crash", null)?.let { crash ->
@@ -104,6 +105,7 @@ class MainActivity : AppCompatActivity() {
             updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { showUpdateDialog(it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
+            addView(button("Zamknij aplikację", "danger") { AppExit.confirm(this@MainActivity) }, lp(top = dp(24)))
             verTxt = text("wersja ${BuildConfig.VERSION_NAME}", 12f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
             addView(verTxt, lp(top = dp(20)))
         }

@@ -49,7 +49,7 @@ class StandbyService : Service() {
             })
         }
 
-        fun wanted(): Boolean = Engine.role == Engine.Role.NONE &&
+        fun wanted(): Boolean = Engine.role == Engine.Role.NONE && !Prefs.standbyPaused &&
             ((Prefs.standbyCoach && Prefs.wasCoach) || (Prefs.standbyAth && Prefs.wasAthlete))
 
         /** Uruchamia lub zatrzymuje czuwanie zależnie od ustawień i stanu sesji. */
@@ -90,6 +90,7 @@ class StandbyService : Service() {
         } catch (e: Exception) { stopSelf(); return START_NOT_STICKY }
         if (!wanted()) { stopSelf(); return START_NOT_STICKY }
         when (intent?.action) {
+            "QUIT" -> { AppExit.quit(this); return START_NOT_STICKY }
             "DECLINE" -> {
                 val room = intent.getStringExtra("room") ?: ""
                 Engine.exec.execute { sendDecline(room) }
@@ -112,7 +113,10 @@ class StandbyService : Service() {
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("Trener na wodzie – czuwanie")
             .setContentText(parts.joinToString("; ").replaceFirstChar { it.uppercase() })
-            .setOngoing(true).setContentIntent(open).setPriority(NotificationCompat.PRIORITY_MIN).build()
+            .setOngoing(true).setContentIntent(open).setPriority(NotificationCompat.PRIORITY_MIN)
+            .addAction(0, "Zamknij aplikację", PendingIntent.getService(this, 41, Intent(this, StandbyService::class.java).setAction("QUIT"),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .build()
     }
 
     // ---------------- połączenia z serwerem ----------------
