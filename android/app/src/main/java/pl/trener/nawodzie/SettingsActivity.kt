@@ -115,6 +115,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
         appCat.action("Aktualizacja zachowuje dane", "Pokoje, ustawienia i nagrania zostają. Trwająca sesja wznawia się jednym dotknięciem po instalacji.") {}
+        appCat.action("Zamknij aplikację", "Kończy sesję, wyłącza działanie w tle i powiadomienie – do następnego otwarcia aplikacji") {
+            activity?.let { AppExit.confirm(it) }
+        }
         if (Engine.role != Engine.Role.NONE) {
             appCat.action("Zakończ sesję", "Rozłącza wszystkich i zatrzymuje nagrywanie") {
                 SessionService.endSession(requireContext()); activity?.finish()

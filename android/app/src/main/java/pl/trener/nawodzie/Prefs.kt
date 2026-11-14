@@ -69,6 +69,10 @@ object Prefs {
     // ---------- czuwanie w tle ----------
     val standbyCoach get() = sp.getBoolean("standby_coach", true)
     val standbyAth get() = sp.getBoolean("standby_ath", true)
+    /** Ustawiane przez „Zamknij aplikację” – czuwanie nie startuje, dopóki użytkownik nie otworzy aplikacji. */
+    var standbyPaused: Boolean
+        get() = sp.getBoolean("standby_paused", false)
+        set(v) = sp.edit().putBoolean("standby_paused", v).commit().let { }
     var wasCoach: Boolean
         get() = sp.getBoolean("was_coach", false)
         set(v) = sp.edit().putBoolean("was_coach", v).apply()
