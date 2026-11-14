@@ -131,7 +131,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 rel == null -> updPref?.summary = "Masz najnowszą wersję"
                 else -> {
                     updPref?.summary = "Dostępna wersja ${rel.version} – dotknij, aby zainstalować"
-                    updPref?.setOnPreferenceClickListener { Updater.downloadAndInstall(requireContext(), rel); true }
+                    updPref?.setOnPreferenceClickListener { activity?.showUpdateDialog(rel); true }
+                    activity?.showUpdateDialog(rel)
                 }
             }
         }
