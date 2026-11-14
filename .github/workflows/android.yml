@@ -56,7 +56,7 @@ jobs:
       - name: Błędy kompilacji (adnotacje)
         if: failure()
         run: |
-          grep -E '^e: |error:|What went wrong|Could not|FAILURE|> ' build.log | head -60 > errs.txt || true
+          { grep -E '^e: ' build.log; grep -E -A4 'What went wrong' build.log; } | head -45 > errs.txt || true
           i=0
           while IFS= read -r line; do
             i=$((i+1)); [ $i -gt 45 ] && break
