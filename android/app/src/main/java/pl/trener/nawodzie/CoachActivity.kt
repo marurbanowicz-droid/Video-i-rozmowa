@@ -88,7 +88,6 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         if (land != landscape) {
             landscape = land
             buildUi(); rangeKey = ""
-            CamRec.setSurface(preview.surfaceProvider)
             syncZoom(); refresh()
         }
     }
@@ -128,7 +127,10 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     @SuppressLint("ClickableViewAccessibility")
     private fun buildUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        preview = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FIT_CENTER }
+        if (!::preview.isInitialized) preview = PreviewView(this).apply {
+            scaleType = PreviewView.ScaleType.FIT_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE   // płynny obrót bez czarnej klatki
+        } else (preview.parent as? ViewGroup)?.removeView(preview)
         root.addView(preview, FrameLayout.LayoutParams(-1, -1))
         val scale = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(det: ScaleGestureDetector): Boolean { applyZoom(dial.zoom * det.scaleFactor); return true }
@@ -148,7 +150,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(if (landscape) 10 else 30), dp(if (landscape) 110 else 10), dp(10))
+            setPadding(dp(10), dp(if (landscape) 10 else 30), dp(if (landscape) 224 else 10), dp(10))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#AA000000"), Color.TRANSPARENT))
             addView(iconBtn(R.drawable.ic_settings, 38) { openSettings() })
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
@@ -169,17 +171,17 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(topH + 34) })
         dataTxt = text("", 11f, Color.parseColor("#CCFFFFFF")).apply { setShadowLayer(4f, 0f, 1f, Color.BLACK) }
-        root.addView(dataTxt, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = dp(topH - 4); rightMargin = dp(if (landscape) 110 else 14) })
+        root.addView(dataTxt, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = dp(topH - 4); rightMargin = dp(if (landscape) 224 else 14) })
 
         athList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(athList) },
             FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                topMargin = dp(topH); leftMargin = dp(10); bottomMargin = dp(if (landscape) 120 else 260)
+                topMargin = dp(topH); leftMargin = dp(10); bottomMargin = dp(if (landscape) 16 else 260)
             })
 
         // ---- zoom i przyciski ----
-        presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        dial = ZoomDial(this).apply { onZoom = { z -> CamRec.setZoom(z); highlightPreset() } }
+        presets = LinearLayout(this).apply { orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        dial = ZoomDial(this).apply { vertical = landscape; onZoom = { z -> CamRec.setZoom(z); highlightPreset() } }
         micBtn = iconBtn(R.drawable.ic_mic, 52) { if (Prefs.talkMode != "ptt") Controls.run("mute_mic", true, true) }
         micBtn.setOnTouchListener { v, e ->
             if (Prefs.talkMode != "ptt") return@setOnTouchListener false
@@ -191,6 +193,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         micBtn.setOnLongClickListener { if (Prefs.talkMode != "ptt") { Engine.toggleFullMute(); true } else false }
         spkBtn = iconBtn(R.drawable.ic_volume_up, 52) { Prefs.speaker = !Prefs.speaker; AudioRouter.apply(); refresh(); Notifier.toast(if (Prefs.speaker) "Dźwięk z głośnika" else "Dźwięk w słuchawkach (jeśli podłączone)") }
+        spkBtn.setOnLongClickListener { volumeDialog(); true }
         shutter = ShutterButton(this).apply { setOnClickListener { toggleRec() } }
         val gallery = iconBtn(R.drawable.ic_gallery, 46) { openGallery() }
         val invite = iconBtn(R.drawable.ic_person_add, 46) { inviteDialog() }
@@ -225,14 +228,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 addView(micBtn); addView(sp()); addView(gallery)
             }
             root.addView(side, FrameLayout.LayoutParams(dp(100), -1, Gravity.END))
-            val bottom = LinearLayout(this).apply {
+            // zoom tuż obok spustu: przyciski skoku + pionowe pokrętło
+            val zoomCol = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(4), dp(8), dp(4))
-                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#AA000000"), Color.TRANSPARENT))
-                addView(presets, LinearLayout.LayoutParams(-2, -2))
-                addView(dial, LinearLayout.LayoutParams(0, dp(70), 1f).apply { marginStart = dp(8) })
+                background = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, intArrayOf(Color.parseColor("#99000000"), Color.TRANSPARENT))
+                addView(presets, LinearLayout.LayoutParams(dp(44), -2))
+                addView(dial, LinearLayout.LayoutParams(dp(70), -1))
             }
-            root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { rightMargin = dp(100) })
+            root.addView(zoomCol, FrameLayout.LayoutParams(dp(120), -1, Gravity.END).apply { rightMargin = dp(100); topMargin = dp(56); bottomMargin = dp(8) })
         }
         setContentView(root)
     }
@@ -257,7 +260,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(glass) }
                     setOnClickListener { applyZoom(v) }
                 }
-                presets.addView(t, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(4); marginEnd = dp(4) })
+                presets.addView(t, LinearLayout.LayoutParams(dp(38), dp(38)).apply { if (landscape) { topMargin = dp(4); bottomMargin = dp(4) } else { marginStart = dp(4); marginEnd = dp(4) } })
             }
         }
         dial.setZoomValue(CamRec.zoomRatio())
@@ -405,6 +408,25 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             if (u != null) startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             else startActivity(Intent(Intent.ACTION_VIEW, MediaStore.Video.Media.EXTERNAL_CONTENT_URI))
         } catch (_: Exception) { Notifier.toast("Nagrania są w Galerii: Filmy/TrenerNaWodzie") }
+    }
+
+    /** Głośność rozmowy i wzmocnienie mikrofonu (przytrzymaj przycisk głośnika). */
+    private fun volumeDialog() {
+        val vol = text(Vol.label(this), 16f, bold = true).apply { gravity = Gravity.CENTER }
+        val mic = text(Vol.micLabel(), 16f, bold = true).apply { gravity = Gravity.CENTER }
+        fun row(lbl: TextView, minus: () -> Unit, plus: () -> Unit, update: () -> String) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(button("−") { minus(); lbl.text = update() }, LinearLayout.LayoutParams(dp(64), -2))
+            addView(lbl, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(button("+") { plus(); lbl.text = update() }, LinearLayout.LayoutParams(dp(64), -2))
+        }
+        val box = column(16).apply {
+            addView(text("Słyszę zawodników", 13f, col(R.color.mut)), lp())
+            addView(row(vol, { Vol.down(this@CoachActivity) }, { Vol.up(this@CoachActivity) }) { Vol.label(this@CoachActivity) }, lp(top = dp(4)))
+            addView(text("Zawodnicy słyszą mnie (nagranie bez zmian)", 13f, col(R.color.mut)), lp(top = dp(16)))
+            addView(row(mic, { Vol.micDown() }, { Vol.micUp() }) { Vol.micLabel() }, lp(top = dp(4)))
+        }
+        MaterialAlertDialogBuilder(this).setTitle("Głośność").setView(box).setPositiveButton("OK", null).show()
     }
 
     private fun ago(t: Long): String {

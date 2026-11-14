@@ -188,6 +188,21 @@ object Engine {
 
     private inline fun safe(block: () -> Unit) { try { block() } catch (e: Exception) { Log.e(TAG, "error", e) } }
 
+    private fun onMicData(format: Int, channels: Int, rate: Int, buf: ByteBuffer) {
+        if (format != android.media.AudioFormat.ENCODING_PCM_16BIT) return
+        val d = buf.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        d.position(0)
+        val n = d.limit()
+        pcmSink?.let { sink -> val copy = ByteArray(n); d.get(copy); d.position(0); sink(copy, rate, channels) }
+        val g = if (role == Role.NONE) 1f else Prefs.micGain
+        if (g == 1f) return
+        val sb = d.asShortBuffer()
+        for (i in 0 until sb.limit()) {
+            val v = (sb.get(i) * g).toInt().coerceIn(-32768, 32767)
+            sb.put(i, v.toShort())
+        }
+    }
+
     private fun initRtc(ns: Boolean, wind: Boolean) {
         if (!factoryInitDone) {
             PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(app).createInitializationOptions())
@@ -196,7 +211,8 @@ object Engine {
         val a = JavaAudioDeviceModule.builder(app)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(ns)
-            .setSamplesReadyCallback { s -> pcmSink?.invoke(s.data, s.sampleRate, s.channelCount) }
+            // surowy dźwięk z mikrofonu: najpierw kopia do nagrania (bez wzmocnienia), potem wzmocnienie wysyłanego głosu
+            .setAudioRecordDataCallback { format, channels, rate, buf -> onMicData(format, channels, rate, buf) }
             .createAudioDeviceModule()
         adm = a
         factory = PeerConnectionFactory.builder().setAudioDeviceModule(a).createPeerConnectionFactory()
