@@ -64,6 +64,37 @@ object Prefs {
         get() = sp.getBoolean("speaker", false)
         set(v) = sp.edit().putBoolean("speaker", v).apply()
 
+    // ---------- czuwanie w tle ----------
+    val standbyCoach get() = sp.getBoolean("standby_coach", true)
+    val standbyAth get() = sp.getBoolean("standby_ath", true)
+    var wasCoach: Boolean
+        get() = sp.getBoolean("was_coach", false)
+        set(v) = sp.edit().putBoolean("was_coach", v).apply()
+    var wasAthlete: Boolean
+        get() = sp.getBoolean("was_athlete", false)
+        set(v) = sp.edit().putBoolean("was_athlete", v).apply()
+    fun standbyId() = "tnw-a-" + cid.lowercase()
+
+    // ---------- historia pokoju (kto już był) ----------
+    data class Seen(val cid: String, val name: String, val last: Long, val app: Boolean)
+    fun history(code: String): List<Seen> {
+        val raw = sp.getString("hist_$code", null) ?: return emptyList()
+        return try {
+            val a = JSONArray(raw)
+            (0 until a.length()).map { a.getJSONObject(it) }.map { Seen(it.getString("cid"), it.optString("name"), it.optLong("last"), it.optBoolean("app")) }
+        } catch (_: Exception) { emptyList() }
+    }
+    fun addHistory(code: String, cid: String, name: String, app: Boolean) {
+        val list = history(code).filter { it.cid != cid }.toMutableList()
+        list.add(0, Seen(cid, name, System.currentTimeMillis(), app))
+        val a = JSONArray(); list.take(30).forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
+        sp.edit().putString("hist_$code", a.toString()).apply()
+    }
+    fun removeHistory(code: String, cid: String) {
+        val a = JSONArray(); history(code).filter { it.cid != cid }.forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
+        sp.edit().putString("hist_$code", a.toString()).apply()
+    }
+
     // ---------- pokoje ----------
     fun loadRooms(): MutableList<Room> {
         val raw = sp.getString("rooms", null)

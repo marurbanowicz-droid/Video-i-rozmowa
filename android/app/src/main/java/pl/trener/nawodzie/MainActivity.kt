@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
             Engine.Role.ATHLETE -> { startActivity(Intent(this, AthleteActivity::class.java)); return }
             else -> {}
         }
+        StandbyService.ensure(this)
         val s = Prefs.session()
         resumeBtn.visibility = if (s != null) View.VISIBLE else View.GONE
         (resumeBtn as TextView).text = if (s?.optString("role") == "coach") "↻ Wznów sesję trenera (${Prefs.currentRoom().name})"
@@ -73,6 +74,18 @@ class MainActivity : AppCompatActivity() {
         if (data != null && data.scheme == "trenernawodzie") {
             data.getQueryParameter("turn")?.takeIf { it.isNotBlank() }?.let { Prefs.sp.edit().putString("turn_url", it).apply() }
             showJoin(Prefs.sanitizeCode(data.getQueryParameter("pokoj") ?: ""))
+            return
+        }
+        i?.getStringExtra("start_coach_room")?.let { code ->
+            i?.removeExtra("start_coach_room")
+            if (Engine.role == Engine.Role.NONE && Prefs.loadRooms().any { it.code == code }) { Prefs.setCurrentRoom(code); askAndStartCoach() }
+            return
+        }
+        i?.getStringExtra("join_room")?.let { code ->
+            i?.removeExtra("join_room")
+            getSystemService(android.app.NotificationManager::class.java).cancel(StandbyService.RING_ID)
+            if (Engine.role != Engine.Role.NONE) return
+            if (Prefs.athName.isBlank()) showJoin(code) else { Prefs.lastRoom = code; askAndStartAthlete(code, Prefs.athName) }
             return
         }
         if (i?.getBooleanExtra("resume", false) == true && Prefs.session() != null && Engine.role == Engine.Role.NONE) resume()
@@ -150,6 +163,8 @@ class MainActivity : AppCompatActivity() {
     private fun askAndStartCoach() {
         pending = {
             if (!granted(Manifest.permission.CAMERA)) Notifier.toast("Bez dostępu do kamery nie będzie nagrywania")
+            Prefs.wasCoach = true
+            StandbyService.stop(this)
             Prefs.saveSession("coach")
             Engine.startCoach()
             SessionService.start(this, granted(Manifest.permission.CAMERA))
@@ -160,6 +175,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun askAndStartAthlete(code: String, name: String) {
         pending = {
+            Prefs.wasAthlete = true
+            StandbyService.stop(this)
             Prefs.saveSession("athlete", code, name)
             Engine.startAthlete(code, name)
             SessionService.start(this, false)
