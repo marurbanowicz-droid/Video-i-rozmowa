@@ -26,6 +26,14 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
     private var dataPref: Preference? = null
     private var stabPref: ListPreference? = null
     private val ui = Engine.Ui { refreshDynamic() }
+    private val pickBackup = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val n = Backup.restoreFrom(requireContext(), uri)
+            Notifier.toast("Przywrócono ustawienia ($n pozycji)" + if (Engine.role != Engine.Role.NONE) ". Pokoje zadziałają po ponownym uruchomieniu sesji." else "")
+            activity?.recreate()
+        } catch (e: Exception) { Notifier.toast("Nie udało się przywrócić: ${e.message}") }
+    }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         coach = activity?.intent?.getBooleanExtra("coach", true) ?: true
@@ -105,6 +113,13 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val appCat = cat("Aplikacja")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
+        appCat.action("Zapisz kopię ustawień teraz", "Kopia zapisuje się też sama po każdej zmianie: Pobrane/TrenerNaWodzie/${Backup.FILE_NAME}") {
+            Thread { val ok = try { Backup.writeAuto() } catch (_: Exception) { false }
+                Notifier.toast(if (ok) "Zapisano kopię w Pobrane/TrenerNaWodzie" else "Nie udało się zapisać kopii") }.start()
+        }
+        appCat.action("Przywróć ustawienia z pliku", "Np. po ponownej instalacji aplikacji") {
+            pickBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"))
+        }
         appCat.action("Aktualizacja zachowuje dane", "Pokoje, ustawienia i nagrania zostają. Trwająca sesja wznawia się jednym dotknięciem po instalacji.") {}
         if (Engine.role != Engine.Role.NONE) {
             appCat.action("Zakończ sesję", "Rozłącza wszystkich i zatrzymuje nagrywanie") {

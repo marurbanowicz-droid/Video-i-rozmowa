@@ -24,6 +24,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updBtn: com.google.android.material.button.MaterialButton
     private lateinit var verTxt: TextView
     private var pending: (() -> Unit)? = null
+    private lateinit var restoreBtn: View
+
+    private val pickBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val n = Backup.restoreFrom(this, uri)
+            Notifier.toast("Przywrócono ustawienia ($n pozycji)")
+            recreate()
+        } catch (e: Exception) { Notifier.toast("Nie udało się przywrócić: ${e.message}") }
+    }
 
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
         val p = pending; pending = null
@@ -61,6 +71,9 @@ class MainActivity : AppCompatActivity() {
             Engine.Role.ATHLETE -> { startActivity(Intent(this, AthleteActivity::class.java)); return }
             else -> {}
         }
+        val fresh = Prefs.sp.getBoolean("fresh_install", false)
+        restoreBtn.visibility = if (fresh) View.VISIBLE else View.GONE
+        home.findViewWithTag<View>("restoreHint")?.visibility = restoreBtn.visibility
         val s = Prefs.session()
         resumeBtn.visibility = if (s != null) View.VISIBLE else View.GONE
         (resumeBtn as TextView).text = if (s?.optString("role") == "coach") "↻ Wznów sesję trenera (${Prefs.currentRoom().name})"
@@ -88,6 +101,9 @@ class MainActivity : AppCompatActivity() {
             addView(resumeBtn, lp(top = dp(24)))
             addView(button("Jestem trenerem") { askAndStartCoach() }, lp(top = dp(12)))
             addView(button("Jestem zawodnikiem") { showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
+            restoreBtn = button("Przywróć ustawienia z kopii") { pickBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) }
+            addView(restoreBtn, lp(top = dp(12)))
+            addView(text("Kopia zapisuje się sama w folderze Pobrane/TrenerNaWodzie.", 12f, col(R.color.mut)).apply { gravity = Gravity.CENTER; tag = "restoreHint" }, lp(top = dp(4)))
             updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { Updater.downloadAndInstall(this@MainActivity, it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
@@ -150,6 +166,7 @@ class MainActivity : AppCompatActivity() {
     private fun askAndStartCoach() {
         pending = {
             if (!granted(Manifest.permission.CAMERA)) Notifier.toast("Bez dostępu do kamery nie będzie nagrywania")
+            Prefs.sp.edit().putBoolean("fresh_install", false).apply()
             Prefs.saveSession("coach")
             Engine.startCoach()
             SessionService.start(this, granted(Manifest.permission.CAMERA))
@@ -160,6 +177,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun askAndStartAthlete(code: String, name: String) {
         pending = {
+            Prefs.sp.edit().putBoolean("fresh_install", false).apply()
             Prefs.saveSession("athlete", code, name)
             Engine.startAthlete(code, name)
             SessionService.start(this, false)

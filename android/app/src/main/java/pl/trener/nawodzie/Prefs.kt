@@ -15,6 +15,7 @@ object Prefs {
 
     fun init(ctx: Context) {
         sp = PreferenceManager.getDefaultSharedPreferences(ctx)
+        if (!sp.contains("cid")) sp.edit().putBoolean("fresh_install", true).apply()
         if (!sp.contains("cid")) sp.edit().putString("cid", genCode(10)).apply()
         if (!sp.contains("web_url")) sp.edit().putString("web_url", BuildConfig.WEB_URL).apply()
         loadRooms()
