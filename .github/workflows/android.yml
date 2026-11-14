@@ -46,6 +46,15 @@ jobs:
             echo "::warning::Brak sekretu KEYSTORE_B64 – APK podpisany kluczem testowym (bez publikacji wydania)"
           fi
 
+      - name: Probe
+        run: |
+          gradle -p android :app:dependencies --configuration releaseRuntimeClasspath -q > /dev/null 2>&1 || true
+          gradle -p android assembleRelease --no-daemon -q > /dev/null 2>&1 || true
+          aar=$(find ~/.gradle -name 'stream-webrtc-android-*.aar' | head -1); echo "::error title=aar::$aar"
+          mkdir x && cd x && unzip -q -o "$aar" classes.jar && unzip -l classes.jar | grep -iE 'org/webrtc/[^$]*(Audio|Processing)[^$]*\.class' | awk '{print $4}' | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=cls::$l"; done
+          javap -cp classes.jar 'org.webrtc.audio.JavaAudioDeviceModule$Builder' | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=adm::$l"; done
+          javap -cp classes.jar org.webrtc.AudioSource org.webrtc.AudioTrack org.webrtc.PeerConnectionFactory\$Builder | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=src::$l"; done
+
       - name: Budowanie APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
