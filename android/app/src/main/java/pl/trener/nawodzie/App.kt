@@ -20,6 +20,14 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Prefs.init(this)
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val sw = java.io.StringWriter(); e.printStackTrace(java.io.PrintWriter(sw))
+                Prefs.sp.edit().putString("last_crash", "Wersja ${BuildConfig.VERSION_NAME}, wątek ${t.name}\n" + sw.toString().take(6000)).commit()
+            } catch (_: Exception) {}
+            prev?.uncaughtException(t, e)
+        }
         Engine.init(this)
         Notifier.init(this)
         Controls.init(this)

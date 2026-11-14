@@ -38,6 +38,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         buildUi()
         handleIntent(intent)
+        Prefs.sp.getString("last_crash", null)?.let { crash ->
+            Prefs.sp.edit().remove("last_crash").apply()
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("Aplikacja została nieoczekiwanie zamknięta")
+                .setMessage("Skopiuj opis błędu i wyślij go, żeby można było to naprawić.\n\n" + crash.take(1500))
+                .setPositiveButton("Kopiuj opis") { _, _ ->
+                    getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("błąd", crash)); Notifier.toast("Skopiowano")
+                }
+                .setNegativeButton("Zamknij", null).show()
+        }
         Updater.check { rel, _ -> if (rel != null) { updBtn.text = "⬆ Zainstaluj aktualizację ${rel.version}"; updBtn.visibility = View.VISIBLE } }
     }
 
