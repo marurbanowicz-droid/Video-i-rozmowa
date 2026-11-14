@@ -50,6 +50,7 @@ jobs:
         run: |
           gradle -p android :app:dependencies --configuration releaseRuntimeClasspath -q > /dev/null 2>&1 || true
           gradle -p android assembleRelease --no-daemon -q > /dev/null 2>&1 || true
+          aar=$(find ~/.gradle -name 'stream-webrtc-android-*.aar' | head -1); mkdir -p x && cd x && unzip -q -o "$aar" classes.jar
           javap -cp classes.jar org.webrtc.audio.AudioRecordDataCallback | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=cb::$l"; done
           javap -cp classes.jar 'org.webrtc.audio.JavaAudioDeviceModule$Builder' | grep -iE 'DataCallback|Record' | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=adm::$l"; done
           javap -p -cp classes.jar org.webrtc.audio.WebRtcAudioRecord | grep -iE 'callback|DataCallback' | tr '\n' ' ' | fold -w 900 | while read l; do echo "::error title=rec::$l"; done
