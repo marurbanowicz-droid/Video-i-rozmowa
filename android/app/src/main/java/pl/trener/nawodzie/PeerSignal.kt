@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  * Klient serwera sygnalizacyjnego PeerJS (0.peerjs.com) – ten sam protokół, którego używa wersja webowa,
  * dzięki temu aplikacja i strona łączą się ze sobą.
  */
-class PeerSignal(val id: String, private val l: Listener) {
+class PeerSignal(val id: String, private val l: Listener, private val heartbeatSec: Long = 5) {
     interface Listener {
         fun onOpen()
         fun onIdTaken()
@@ -57,7 +57,7 @@ class PeerSignal(val id: String, private val l: Listener) {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { gone() }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
         })
-        hb = Engine.exec.scheduleAtFixedRate({ ws?.send("{\"type\":\"HEARTBEAT\"}") }, 5, 5, TimeUnit.SECONDS)
+        hb = Engine.exec.scheduleAtFixedRate({ ws?.send("{\"type\":\"HEARTBEAT\"}") }, heartbeatSec, heartbeatSec, TimeUnit.SECONDS)
     }
 
     private fun gone() {

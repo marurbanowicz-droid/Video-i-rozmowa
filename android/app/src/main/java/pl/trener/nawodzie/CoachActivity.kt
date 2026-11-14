@@ -362,6 +362,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         shutter.recording = CamRec.recording != null
         // zawodnicy – każdy z osobnym wyciszeniem
         athList.removeAllViews()
+        val onlineIds = all.filter { it.status == "online" }.map { it.cid }.toSet()
+        if (Prefs.history(r.code).any { it.cid !in onlineIds }) {
+            val call = pillText("Zadzwoń").apply {
+                setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_call, 0, 0, 0); compoundDrawablePadding = dp(6)
+                setOnClickListener { callDialog() }
+            }
+            athList.addView(call, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(8) })
+        }
         for (a in all) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -397,6 +405,31 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             if (u != null) startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             else startActivity(Intent(Intent.ACTION_VIEW, MediaStore.Video.Media.EXTERNAL_CONTENT_URI))
         } catch (_: Exception) { Notifier.toast("Nagrania są w Galerii: Filmy/TrenerNaWodzie") }
+    }
+
+    private fun ago(t: Long): String {
+        val m = (System.currentTimeMillis() - t) / 60000
+        return when { m < 60 -> "${maxOf(1, m)} min temu"; m < 48 * 60 -> "${m / 60} godz. temu"; else -> "${m / 1440} dni temu" }
+    }
+
+    /** Lista osób, które były wcześniej w tym pokoju – wybierz, do kogo zadzwonić. */
+    private fun callDialog() {
+        val r = Prefs.currentRoom()
+        val online = Engine.athletesView.filter { it.status == "online" }.map { it.cid }.toSet()
+        val list = Prefs.history(r.code).filter { it.cid !in online }
+        if (list.isEmpty()) { Notifier.toast("Wszyscy z tego pokoju są już połączeni"); return }
+        val labels = list.map { it.name + " · " + ago(it.last) + if (!it.app) " · strona (nie odbierze)" else "" }.toTypedArray()
+        val checked = list.map { it.app }.toBooleanArray()
+        MaterialAlertDialogBuilder(this).setTitle("Zadzwoń – ${r.name}")
+            .setMultiChoiceItems(labels, checked) { _, i, c -> checked[i] = c }
+            .setPositiveButton("Zadzwoń") { _, _ ->
+                val sel = list.filterIndexed { i, _ -> checked[i] }
+                if (sel.isEmpty()) Notifier.toast("Nikogo nie wybrano") else Engine.ring(sel)
+            }
+            .setNeutralButton("Usuń zaznaczone z listy") { _, _ ->
+                list.filterIndexed { i, _ -> checked[i] }.forEach { Prefs.removeHistory(r.code, it.cid) }; refresh()
+            }
+            .setNegativeButton("Anuluj", null).show()
     }
 
     private fun openSettings() = startActivity(Intent(this, SettingsActivity::class.java).putExtra("coach", true))

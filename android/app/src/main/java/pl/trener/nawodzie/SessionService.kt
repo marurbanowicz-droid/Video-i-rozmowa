@@ -37,6 +37,7 @@ class SessionService : LifecycleService() {
             Prefs.clearSession()
             Engine.stop()
             mainHandler.postDelayed({ app.stopService(Intent(app, SessionService::class.java)) }, if (wasRec) 2500 else 600)
+            mainHandler.postDelayed({ StandbyService.ensure(app) }, if (wasRec) 4000 else 2000)
         }
     }
 

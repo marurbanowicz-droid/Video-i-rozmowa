@@ -102,6 +102,13 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         notif.sw("n_text", "Komunikat na ekranie", null, true)
         notif.sw("n_voice", "Komunikat głosowy", "Np. „Ola – utracono połączenie”.", false)
 
+        val sb = cat("Czuwanie w tle (poza sesją)")
+        sb.sw("standby_coach", "Powiadamiaj, gdy ktoś łączy się z moim pokojem",
+            "Działa dla zapisanych pokoi, gdy nie prowadzisz sesji. Dotknięcie powiadomienia rozpoczyna sesję.", true)
+        sb.sw("standby_ath", "Pozwól trenerowi do mnie dzwonić",
+            "Trener może wywołać Cię z listy osób, które były w jego pokoju (tylko aplikacja Android).", true)
+        sb.action("Zużycie baterii", "Czuwanie utrzymuje połączenie z serwerem – podobnie jak komunikatory, kilka % baterii na dobę. Wyłącz obie opcje, aby zatrzymać czuwanie.") {}
+
         val appCat = cat("Aplikacja")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
@@ -156,6 +163,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         key ?: return
         when (key) {
             "vol_up", "vol_down" -> Controls.applyVolumeMode()
+            "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
             "quality", "stab_mode", "sport_crop" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")

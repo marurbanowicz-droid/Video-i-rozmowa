@@ -115,6 +115,7 @@ object Engine {
         var badSince = 0L
         var offlineSince = 0L
         var wasOnline = false
+        var app = false
     }
     private val athletes = LinkedHashMap<String, Athlete>()
     private val dataLinks = HashMap<String, Link>()
@@ -313,6 +314,9 @@ object Engine {
     private fun onSignal(type: String, src: String?, p: JSONObject?) {
         when (type) {
             "OFFER" -> if (src != null && p != null) {
+                val t = p.optString("type")
+                if (t == "ring-decline") { if (role == Role.COACH) Notifier.event("leave", "${p.optString("name").ifEmpty { "Zawodnik" }} odrzuca połączenie"); return }
+                if (t == "ring") return
                 if (role == Role.COACH) onOffer(src, p)
                 else if (role == Role.ATHLETE && p.optJSONObject("metadata")?.optBoolean("mesh") == true) onMeshOffer(src, p)
             }
@@ -327,7 +331,10 @@ object Engine {
                 val ic = IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate"))
                 if (l.remoteSet) l.pc?.addIceCandidate(ic) else l.cands.add(ic)
             }
-            "EXPIRE" -> if (role == Role.ATHLETE && src != null && src != coachPeerId()) {
+            "EXPIRE" -> if (role == Role.COACH && src != null && src.startsWith("tnw-a-")) {
+                val n = pendingRings.remove(src) ?: "Zawodnik"
+                Notifier.toast("$n – nieosiągalny (aplikacja wyłączona, czuwanie wyłączone lub brak zasięgu)")
+            } else if (role == Role.ATHLETE && src != null && src != coachPeerId()) {
                 mesh.entries.filter { it.value.peer == src }.map { it.key to it.value }.forEach { (k, v) -> closeLink(v); mesh.remove(k) }
                 refreshMeshUp()
             } else if (role == Role.ATHLETE && src == coachPeerId()) {
@@ -560,7 +567,10 @@ object Engine {
         val cid = md?.optString("cid")?.takeIf { it.isNotEmpty() } ?: src
         val l = Link(connId, src, type, md).also { it.cid = cid }
         val pc = createPc(l) ?: return
-        if (type == "media") onAthleteCall(l, cid, (md?.optString("name") ?: "").ifEmpty { "Zawodnik" }.take(24))
+        if (type == "media") {
+            onAthleteCall(l, cid, (md?.optString("name") ?: "").ifEmpty { "Zawodnik" }.take(24))
+            athletes[cid]?.let { it.app = it.app || md?.optBoolean("app") == true }
+        }
         else { dataLinks[cid]?.takeIf { it !== l }?.let { closeLink(it) }; dataLinks[cid] = l }
         val sdp = p.optJSONObject("sdp") ?: return
         setRemote(pc, parseSdp(sdp)) {
@@ -595,6 +605,7 @@ object Engine {
             "connecting" -> Notifier.event("join", "${a.name} dołącza")
         }
         a.wasOnline = true
+        Prefs.addHistory(Prefs.currentRoom().code, a.cid, a.name, a.app)
         applyBitrate(a.media?.pc, Prefs.kbps)
         snapshot(); changed(); broadcastRoster()
     }
@@ -660,10 +671,25 @@ object Engine {
     }
     fun roomRenamed() = exec.execute { broadcastRoster(); changed() }
 
+    // ---- „zadzwoń” do zawodników, którzy byli wcześniej w pokoju ----
+    private val pendingRings = HashMap<String, String>()
+    fun ring(list: List<Prefs.Seen>) = exec.execute {
+        if (role != Role.COACH) return@execute
+        if (!signalOpen) { Notifier.toast("Brak połączenia z serwerem – spróbuj za chwilę"); return@execute }
+        val r = Prefs.currentRoom()
+        for (s in list) {
+            val id = "tnw-a-" + s.cid.lowercase()
+            pendingRings[id] = s.name
+            signal?.send("OFFER", id, JSONObject().put("type", "ring").put("connectionId", "ring_" + rnd())
+                .put("room", r.code).put("roomName", r.name).put("turn", Prefs.turnUrl))
+        }
+        Notifier.toast("Dzwonię do: " + list.joinToString { it.name })
+    }
+
     // =====================================================================
     // ZAWODNIK
     // =====================================================================
-    private fun athMeta() = JSONObject().put("name", athName).put("cid", Prefs.cid)
+    private fun athMeta() = JSONObject().put("name", athName).put("cid", Prefs.cid).put("app", true)
 
     private fun athCall() {
         if (role != Role.ATHLETE || !signalOpen) return
