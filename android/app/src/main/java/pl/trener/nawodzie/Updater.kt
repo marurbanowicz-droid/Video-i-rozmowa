@@ -53,50 +53,81 @@ object Updater {
         }.start()
     }
 
-    /** Pobiera APK i otwiera instalator. Sesja zostanie wznowiona po aktualizacji. */
+    // ---------------- postęp aktualizacji (widoczny w oknie) ----------------
+    data class Progress(val step: Int, val title: String, val detail: String, val pct: Int, val error: Boolean = false, val finished: Boolean = false)
+    @Volatile var progress: Progress? = null; private set
+    @Volatile private var cancelled = false
+    @Volatile var busy = false; private set
+    private val listeners = java.util.concurrent.CopyOnWriteArraySet<(Progress) -> Unit>()
+    fun listen(l: (Progress) -> Unit) { listeners.add(l); progress?.let { p -> onMain { l(p) } } }
+    fun unlisten(l: (Progress) -> Unit) { listeners.remove(l) }
+    internal fun emit(p: Progress) { progress = p; onMain { listeners.forEach { it(p) } } }
+    fun cancel() { cancelled = true }
+
+    private fun mb(b: Long) = String.format(java.util.Locale.US, "%.1f", b / 1048576.0).replace('.', ',')
+    private fun secs(s: Long) = if (s >= 60) "${s / 60} min ${s % 60} s" else "$s s"
+
+    /** Pobiera APK (z postępem), sprawdza go i przekazuje do instalatora systemowego. */
     fun downloadAndInstall(ctx: Context, rel: Release) {
-        if (CamRec.recording != null) { Notifier.toast("Zakończ nagrywanie przed aktualizacją"); return }
+        if (CamRec.recording != null) { emit(Progress(0, "Najpierw zakończ nagrywanie", "Aktualizacja w trakcie nagrywania przerwałaby film.", 0, error = true)); return }
+        if (busy) return
         val app = ctx.applicationContext
         if (!app.packageManager.canRequestPackageInstalls()) {
-            Notifier.toast("Zezwól aplikacji na instalowanie aktualizacji, potem spróbuj ponownie")
+            emit(Progress(0, "Potrzebne pozwolenie", "Otwieram ustawienia: włącz „Zezwalaj z tego źródła”, wróć do aplikacji i dotknij „Aktualizuj” jeszcze raz.", 0, error = true))
             ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
-        Notifier.toast("Pobieram wersję ${rel.version}…")
+        busy = true; cancelled = false
+        val sizeTxt = if (rel.size > 0) "${mb(rel.size)} MB" else "ok. 48 MB"
+        emit(Progress(1, "Krok 1/4 · Łączenie z serwerem", "Wersja ${rel.version}, rozmiar $sizeTxt", -1))
         Thread {
+            val nm = app.getSystemService(android.app.NotificationManager::class.java)
             try {
                 val dir = app.getExternalFilesDir(null) ?: app.filesDir
+                dir.listFiles()?.filter { it.name.startsWith("aktualizacja-") }?.forEach { it.delete() }
                 val f = File(dir, "aktualizacja-${rel.version}.apk")
-                val nm = app.getSystemService(android.app.NotificationManager::class.java)
-                fun progress(pct: Int) {
-                    try {
-                        nm.notify(12, NotificationCompat.Builder(app, UpdateReceiver.CHANNEL).setSmallIcon(R.drawable.ic_notif)
-                            .setContentTitle("Pobieranie wersji ${rel.version}").setOnlyAlertOnce(true).setOngoing(true)
-                            .setProgress(100, pct, pct < 0).build())
-                    } catch (_: SecurityException) {}
-                }
-                progress(-1)
                 PeerSignal.http.newCall(Request.Builder().url(rel.apkUrl).build()).execute().use { r ->
-                    if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")
+                    if (!r.isSuccessful) throw IllegalStateException("serwer odpowiedział błędem ${r.code}")
                     val total = r.body!!.contentLength().takeIf { it > 0 } ?: rel.size
+                    val t0 = System.currentTimeMillis()
                     f.outputStream().use { out ->
-                        val inp = r.body!!.byteStream(); val buf = ByteArray(64 * 1024); var done = 0L; var last = -1
+                        val inp = r.body!!.byteStream(); val buf = ByteArray(64 * 1024); var done = 0L; var lastEmit = 0L
                         while (true) {
+                            if (cancelled) throw InterruptedException()
                             val n = inp.read(buf); if (n < 0) break
                             out.write(buf, 0, n); done += n
-                            val pct = if (total > 0) (done * 100 / total).toInt() else -1
-                            if (pct != last && pct % 5 == 0) { last = pct; progress(pct) }
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit > 300) {
+                                lastEmit = now
+                                val el = (now - t0).coerceAtLeast(1) / 1000.0
+                                val speed = done / el
+                                val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                                val left = if (total > 0 && speed > 0) ((total - done) / speed).toLong() else -1
+                                val det = "${mb(done)} z ${if (total > 0) mb(total) else "?"} MB · ${mb(speed.toLong())} MB/s" +
+                                    if (left >= 0) " · zostało ok. ${secs(left)}" else ""
+                                emit(Progress(1, "Krok 1/4 · Pobieranie $pct%", det, pct))
+                                try {
+                                    nm.notify(12, NotificationCompat.Builder(app, UpdateReceiver.CHANNEL).setSmallIcon(R.drawable.ic_notif)
+                                        .setContentTitle("Pobieranie wersji ${rel.version} – $pct%").setContentText(det)
+                                        .setOnlyAlertOnce(true).setOngoing(true).setProgress(100, pct.coerceAtLeast(0), pct < 0).build())
+                                } catch (_: SecurityException) {}
+                            }
                         }
                     }
                 }
                 nm.cancel(12)
-                if (rel.size > 0 && f.length() != rel.size) throw IllegalStateException("pobrano ${f.length()} z ${rel.size} bajtów – spróbuj ponownie")
+                emit(Progress(2, "Krok 2/4 · Sprawdzanie pliku", "Czy plik pobrał się w całości…", -1))
+                if (rel.size > 0 && f.length() != rel.size) throw IllegalStateException("plik niepełny (${mb(f.length())} z ${mb(rel.size)} MB) – sprawdź zasięg i spróbuj ponownie")
+                emit(Progress(3, "Krok 3/4 · Przygotowanie instalacji", "Przekazuję plik do instalatora systemu…", -1))
                 if (Prefs.session() != null) Prefs.resumeAfterUpdate = true
                 installSession(app, f)
+                emit(Progress(4, "Krok 4/4 · Potwierdź instalację", "W oknie systemu dotknij „Aktualizuj”. Aplikacja zamknie się na chwilę i wróci w nowej wersji – sesję wznowisz jednym dotknięciem.", 100))
+            } catch (e: InterruptedException) {
+                nm.cancel(12); emit(Progress(0, "Anulowano", "Pobieranie przerwane.", 0, error = true))
             } catch (e: Exception) {
-                try { app.getSystemService(android.app.NotificationManager::class.java).cancel(12) } catch (_: Exception) {}
-                Notifier.toast("Nie udało się pobrać aktualizacji: ${e.message}")
-            }
+                nm.cancel(12)
+                emit(Progress(0, "Aktualizacja nieudana", (e.message ?: "nieznany błąd") + "\n\nMożesz też pobrać plik ręcznie ze strony GitHub (Releases).", 0, error = true))
+            } finally { busy = false }
         }.start()
     }
 }
@@ -137,7 +168,8 @@ class InstallReceiver : BroadcastReceiver() {
             else -> {
                 Prefs.resumeAfterUpdate = false
                 val msg = intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "kod $st"
-                Notifier.toast("Aktualizacja nieudana: $msg. Pobierz plik ze strony GitHub (Releases).")
+                Updater.emit(Updater.Progress(0, "Instalacja nieudana", "$msg\n\nPobierz plik ręcznie ze strony GitHub (Releases).", 0, error = true))
+                Notifier.toast("Aktualizacja nieudana: $msg")
             }
         }
     }

@@ -96,3 +96,45 @@ fun Context.askBatteryOnce(force: Boolean = false) {
 }
 
 fun sdkAtLeast(v: Int) = Build.VERSION.SDK_INT >= v
+
+/** Okno aktualizacji z etapami i postępem pobierania. */
+fun android.app.Activity.showUpdateDialog(rel: Updater.Release) {
+    val ctx = this
+    val title = ctx.text("Dostępna wersja ${rel.version}", 18f, bold = true)
+    val bar = android.widget.ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; isIndeterminate = false; progress = 0 }
+    val size = if (rel.size > 0) String.format(java.util.Locale.US, "%.0f MB", rel.size / 1048576.0) else "ok. 48 MB"
+    val detail = ctx.text("Rozmiar: $size. Przy dobrym zasięgu pobieranie trwa zwykle 20–60 s.\nPokoje i ustawienia zostaną zachowane.", 14f, ctx.col(R.color.mut))
+    val box = ctx.column(20).apply {
+        gravity = Gravity.START
+        addView(title, lp()); addView(bar, lp(top = ctx.dp(14))); addView(detail, lp(top = ctx.dp(10)))
+    }
+    val dlg = MaterialAlertDialogBuilder(ctx).setView(box).setCancelable(false)
+        .setPositiveButton("Aktualizuj", null).setNegativeButton("Zamknij", null).setNeutralButton("Strona GitHub", null).create()
+    val l: (Updater.Progress) -> Unit = { p ->
+        title.text = p.title
+        detail.text = p.detail
+        bar.isIndeterminate = p.pct < 0 && !p.error
+        if (p.pct >= 0) bar.progress = p.pct
+        bar.visibility = if (p.error) View.GONE else View.VISIBLE
+        dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.apply {
+            visibility = if (p.error) View.VISIBLE else View.GONE; text = "Spróbuj ponownie"
+        }
+        dlg.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.text = if (Updater.busy) "Anuluj" else "Zamknij"
+    }
+    dlg.setOnShowListener {
+        bar.visibility = View.INVISIBLE
+        dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            bar.visibility = View.VISIBLE
+            it.visibility = View.GONE
+            Updater.downloadAndInstall(ctx, rel)
+        }
+        dlg.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).setOnClickListener { if (Updater.busy) Updater.cancel() else dlg.dismiss() }
+        dlg.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).setOnClickListener {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(rel.page.ifEmpty { "https://github.com/${BuildConfig.GH_REPO}/releases/latest" }))) } catch (_: Exception) {}
+        }
+        Updater.listen(l)
+        if (Updater.busy) { dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE).visibility = View.GONE; bar.visibility = View.VISIBLE }
+    }
+    dlg.setOnDismissListener { Updater.unlisten(l) }
+    dlg.show()
+}

@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
             addView(resumeBtn, lp(top = dp(24)))
             addView(button("Jestem trenerem") { askAndStartCoach() }, lp(top = dp(12)))
             addView(button("Jestem zawodnikiem") { showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
-            updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { Updater.downloadAndInstall(this@MainActivity, it) } }
+            updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { showUpdateDialog(it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
             verTxt = text("wersja ${BuildConfig.VERSION_NAME}", 12f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
