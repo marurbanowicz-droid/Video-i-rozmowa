@@ -55,6 +55,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
                 arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – duże kadrowanie (motorówka)"), arrayOf("off", "std", "sport"), Prefs.stabMode)
+                .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
             img.list("sport_crop", "Tryb Sport: siła kadrowania", arrayOf("Średnia (kadr 70%)", "Duża (kadr 62%)", "Bardzo duża (kadr 55%)"), arrayOf("1.4", "1.6", "1.8"), "1.6")
             img.sw("sport_inv_h", "Tryb Sport: odwróć korektę w poziomie", "Włącz, jeśli obraz „ucieka” w złą stronę przy obrocie w bok.", false)
             img.sw("sport_inv_v", "Tryb Sport: odwróć korektę w pionie", "Włącz, jeśli obraz „ucieka” w złą stronę przy kiwaniu w górę/dół.", false)
