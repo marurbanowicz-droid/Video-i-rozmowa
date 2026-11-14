@@ -28,6 +28,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var dataTxt: TextView
     private lateinit var hint: TextView
     private lateinit var muteAll: MaterialButton
+    private lateinit var volTxt: TextView
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean = Controls.dispatch(event) || super.dispatchKeyEvent(event)
 
@@ -61,6 +62,13 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
         root.addView(hint, lp(top = dp(6)))
         root.addView(muteBtn, lp(top = dp(16)))
         root.addView(spkBtn, lp(top = dp(10)))
+        volTxt = text("", 15f, bold = true).apply { gravity = Gravity.CENTER }
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(button("−") { Vol.down(this@AthleteActivity); refresh() }.apply { setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26f) }, LinearLayout.LayoutParams(dp(72), -2))
+            addView(volTxt, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(button("+") { Vol.up(this@AthleteActivity); refresh() }.apply { setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26f) }, LinearLayout.LayoutParams(dp(72), -2))
+        }, lp(top = dp(10)))
         root.addView(muteAll, lp(top = dp(10)))
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -119,6 +127,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
         muteAll.backgroundTintList = android.content.res.ColorStateList.valueOf(if (Engine.fullMute) Color.parseColor("#E6FF3B30") else col(R.color.card))
         spkBtn.text = if (Prefs.speaker) "Dźwięk: głośnik" else "Dźwięk: słuchawki"
         spkBtn.setIconResource(if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
+        volTxt.text = Vol.label(this)
         val tot = Engine.bytesSent + Engine.bytesRecv
         dataTxt.text = "Dane w tej sesji: ${fmtBytes(tot)} (wysłane ${fmtBytes(Engine.bytesSent)}, odebrane ${fmtBytes(Engine.bytesRecv)})"
         dataTxt.visibility = View.VISIBLE

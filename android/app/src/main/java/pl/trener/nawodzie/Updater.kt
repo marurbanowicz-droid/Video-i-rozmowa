@@ -67,14 +67,34 @@ object Updater {
             try {
                 val dir = app.getExternalFilesDir(null) ?: app.filesDir
                 val f = File(dir, "aktualizacja-${rel.version}.apk")
+                val nm = app.getSystemService(android.app.NotificationManager::class.java)
+                fun progress(pct: Int) {
+                    try {
+                        nm.notify(12, NotificationCompat.Builder(app, UpdateReceiver.CHANNEL).setSmallIcon(R.drawable.ic_notif)
+                            .setContentTitle("Pobieranie wersji ${rel.version}").setOnlyAlertOnce(true).setOngoing(true)
+                            .setProgress(100, pct, pct < 0).build())
+                    } catch (_: SecurityException) {}
+                }
+                progress(-1)
                 PeerSignal.http.newCall(Request.Builder().url(rel.apkUrl).build()).execute().use { r ->
                     if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")
-                    f.outputStream().use { out -> r.body!!.byteStream().copyTo(out) }
+                    val total = r.body!!.contentLength().takeIf { it > 0 } ?: rel.size
+                    f.outputStream().use { out ->
+                        val inp = r.body!!.byteStream(); val buf = ByteArray(64 * 1024); var done = 0L; var last = -1
+                        while (true) {
+                            val n = inp.read(buf); if (n < 0) break
+                            out.write(buf, 0, n); done += n
+                            val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                            if (pct != last && pct % 5 == 0) { last = pct; progress(pct) }
+                        }
+                    }
                 }
+                nm.cancel(12)
                 if (rel.size > 0 && f.length() != rel.size) throw IllegalStateException("pobrano ${f.length()} z ${rel.size} bajtów – spróbuj ponownie")
                 if (Prefs.session() != null) Prefs.resumeAfterUpdate = true
                 installSession(app, f)
             } catch (e: Exception) {
+                try { app.getSystemService(android.app.NotificationManager::class.java).cancel(12) } catch (_: Exception) {}
                 Notifier.toast("Nie udało się pobrać aktualizacji: ${e.message}")
             }
         }.start()
@@ -102,7 +122,16 @@ class InstallReceiver : BroadcastReceiver() {
             android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // zapasowo powiadomienie – gdyby system nie pozwolił otworzyć okna instalacji automatycznie
+                try {
+                    val pi = PendingIntent.getActivity(ctx, 13, confirm, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                    ctx.getSystemService(android.app.NotificationManager::class.java).notify(13,
+                        NotificationCompat.Builder(ctx, UpdateReceiver.CHANNEL).setSmallIcon(R.drawable.ic_notif)
+                            .setContentTitle("Aktualizacja gotowa").setContentText("Dotknij, aby zainstalować")
+                            .setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).setContentIntent(pi).build())
+                } catch (_: Exception) {}
+                try { ctx.startActivity(confirm) } catch (_: Exception) {}
             }
             android.content.pm.PackageInstaller.STATUS_SUCCESS -> {}
             else -> {

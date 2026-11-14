@@ -27,6 +27,8 @@ class ZoomDial(ctx: Context) : View(ctx) {
     var maxZ = 1f; private set
     var zoom = 1f; private set
     var onZoom: ((Float) -> Unit)? = null
+    /** Pionowe pokrętło (układ poziomy telefonu): przeciąganie w górę przybliża. */
+    var vertical = false
 
     private val d = resources.displayMetrics.density
     private val tickP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeWidth = 1.5f * d; strokeCap = Paint.Cap.ROUND }
@@ -60,14 +62,15 @@ class ZoomDial(ctx: Context) : View(ctx) {
         return out
     }
 
-    private val pxPerLog get() = width * 0.42f
+    private val pxPerLog get() = (if (vertical) height else width) * 0.42f
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { lastX = e.x; parent?.requestDisallowInterceptTouchEvent(true); return true }
+            MotionEvent.ACTION_DOWN -> { lastX = if (vertical) e.y else e.x; parent?.requestDisallowInterceptTouchEvent(true); return true }
             MotionEvent.ACTION_MOVE -> {
-                val dx = e.x - lastX; lastX = e.x
+                val pos = if (vertical) e.y else e.x
+                val dx = pos - lastX; lastX = pos
                 val nz = exp(ln(zoom) - dx / pxPerLog).coerceIn(minZ, maxZ)
                 if (nz != zoom) {
                     zoom = nz
@@ -84,6 +87,7 @@ class ZoomDial(ctx: Context) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         if (width == 0) return
+        if (vertical) { drawVertical(c); return }
         val cx = width / 2f
         val r = width * 0.95f
         val apex = 34f * d
@@ -111,6 +115,36 @@ class ZoomDial(ctx: Context) : View(ctx) {
         val w = valueP.measureText(txt) + 16 * d
         c.drawRoundRect(RectF(cx - w / 2, 2 * d, cx + w / 2, apex - 11 * d), 10 * d, 10 * d, accentP)
         c.drawText(txt, cx, apex - 16 * d, valueP)
+    }
+
+    private fun drawVertical(c: Canvas) {
+        val cy = height / 2f
+        val r = height * 0.95f
+        val apex = width - 14f * d
+        val cx = apex - r
+        val lz = ln(zoom)
+        for ((v, major) in ticks) {
+            val th = (ln(v) - lz) * pxPerLog / r
+            if (abs(th) > 0.62f) continue
+            val a = (1f - abs(th) / 0.62f).coerceIn(0f, 1f)
+            val s = sin(th); val co = cos(th)
+            val len = if (major) 13f * d else 7f * d
+            val p = if (major) majorP else tickP
+            p.alpha = (255 * a).toInt()
+            c.drawLine(cx + r * co, cy + r * s, cx + (r - len) * co, cy + (r - len) * s, p)
+            if (major) {
+                labelP.alpha = (255 * a).toInt()
+                val lr = r - 30f * d
+                c.drawText(fmt(v), cx + lr * co, cy + lr * s + 4f * d, labelP)
+            }
+        }
+        tri.reset(); tri.moveTo(apex + 10 * d, cy - 6 * d); tri.lineTo(apex + 10 * d, cy + 6 * d); tri.lineTo(apex + 3 * d, cy); tri.close()
+        c.drawPath(tri, accentP)
+        val txt = String.format(Locale.US, "%.1f×", zoom)
+        val w = valueP.measureText(txt) + 14 * d
+        val top = 4 * d
+        c.drawRoundRect(RectF(width / 2f - w / 2, top, width / 2f + w / 2, top + 22 * d), 10 * d, 10 * d, accentP)
+        c.drawText(txt, width / 2f, top + 16 * d, valueP)
     }
 
     private fun fmt(v: Float) = if (v < 1f) String.format(Locale.US, ".%d", (v * 10).roundToInt()) else "${v.roundToInt()}"

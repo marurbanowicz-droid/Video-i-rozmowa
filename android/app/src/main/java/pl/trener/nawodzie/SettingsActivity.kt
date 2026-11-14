@@ -77,7 +77,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         talk.action("Jak działają przyciski", "Działają też przy zgaszonym ekranie. Push-to-talk: przytrzymaj, aby mówić; w słuchawkach Bluetooth – kliknij, aby zacząć i kliknij ponownie, aby skończyć.") {}
 
         val snd = cat("Dźwięk")
-        snd.list("gain", "Wzmocnienie głosu rozmówców", arrayOf("1× (bez wzmocnienia)", "2×", "3× (zalecane)", "4×", "6×", "8× (może przesterowywać)"), arrayOf("1", "2", "3", "4", "6", "8"), "3")
+        snd.list("mic_gain", "Wzmocnienie mikrofonu (Mic Gain)", arrayOf("0,5×", "0,75×", "1× (bez zmian)", "1,5×", "2×", "3×", "4× (może przesterowywać)"),
+            arrayOf("0.5", "0.75", "1", "1.5", "2", "3", "4"), "1")
+        snd.list("gain", "Głośność odbieranego głosu (wzmocnienie)", arrayOf("1× (bez wzmocnienia)", "2×", "3× (zalecane)", "4×", "6×", "8× (może przesterowywać)"), arrayOf("1", "2", "3", "4", "6", "8"), "3")
         if (coach) {
             snd.sw("coach_noise", "Redukcja szumów", "Działa też na nagraniu – może przytłumić sygnał startu.", false)
             snd.sw("coach_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru i silnika.", true)

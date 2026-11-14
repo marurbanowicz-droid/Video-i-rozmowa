@@ -50,7 +50,9 @@ object Prefs {
     val talkMode: String get() = sp.getString("talk_mode", "open") ?: "open"
     val headsetAction: String get() = sp.getString("headset_action", "mute_all") ?: "mute_all"
     fun volAction(up: Boolean, coach: Boolean): String =
-        sp.getString(if (up) "vol_up" else "vol_down", null) ?: if (up) "mute_all" else if (coach) "record" else "volume"
+        sp.getString(if (up) "vol_up" else "vol_down", null) ?: if (!coach) "volume" else if (up) "mute_all" else "record"
+    /** Wzmocnienie mikrofonu (wysyłanego głosu). Nagranie zawsze dostaje surowy dźwięk. */
+    val micGain: Float get() = (sp.getString("mic_gain", "1") ?: "1").toFloatOrNull() ?: 1f
     /** Wzmocnienie odbieranego głosu (WebRTC: 0–10). */
     val gain: Double get() = (sp.getString("gain", "3") ?: "3").toDoubleOrNull() ?: 3.0
     val kbps: Int get() = (sp.getString("kbps", "32") ?: "32").toIntOrNull() ?: 32
