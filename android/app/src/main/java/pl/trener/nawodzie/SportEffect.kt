@@ -62,6 +62,8 @@ class SportProcessor(ctx: Context, private val sensorRotation: Int) : SurfacePro
     private var released = false
 
     private val sm = ctx.applicationContext.getSystemService(SensorManager::class.java)
+    // siła kadrowania jest stała dla danego podpięcia kamery (zmiana ustawienia podpina kamerę od nowa)
+    private val crop = Prefs.sportCrop.coerceIn(1.1f, 2.2f)
 
     // stan stabilizacji (wszystko na wątku [handler])
     private val th = DoubleArray(3); private val lp = DoubleArray(3)
@@ -75,7 +77,9 @@ class SportProcessor(ctx: Context, private val sensorRotation: Int) : SurfacePro
     init {
         handler.post {
             try { initGl() } catch (e: Exception) { Log.e(TAG, "gl", e) }
-            sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST, handler) }
+            // 200 Hz – najwyższa częstotliwość dostępna bez dodatkowych uprawnień (Android 12+)
+            try { sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, 5000, handler) } }
+            catch (e: Exception) { Log.e(TAG, "gyro", e) }
         }
     }
 
@@ -187,7 +191,7 @@ class SportProcessor(ctx: Context, private val sensorRotation: Int) : SurfacePro
     }
 
     // ---------------- żyroskop i korekta ----------------
-    private fun scale() = Prefs.sportCrop.coerceIn(1.1f, 2.2f)
+    private fun scale() = crop
     private fun fz() = F_NORM * CamRec.curZoom.coerceAtLeast(0.5f)
 
     override fun onSensorChanged(e: SensorEvent) {

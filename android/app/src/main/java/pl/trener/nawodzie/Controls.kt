@@ -92,7 +92,7 @@ object Controls {
         lastVol[i] = now
         val a = Prefs.volAction(up, isCoach())
         if (a == "volume") app.getSystemService(AudioManager::class.java)
-            .adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+            .adjustStreamVolume(Vol.stream(app), if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
         else run(a, true, false)
     }
 
@@ -158,28 +158,44 @@ object Controls {
 
 /** Głośność rozmowy (kanał „Połączenie”), wzmocnienie odbioru i mikrofonu – przyciski + / − na ekranie. */
 object Vol {
-    private const val VC = AudioManager.STREAM_VOICE_CALL
+    private const val STREAM_BT_SCO = 6   // AudioManager.STREAM_BLUETOOTH_SCO – osobna głośność rozmowy w słuchawkach Bluetooth
+
+    /** Strumień, którym faktycznie gra rozmowa: w słuchawkach Bluetooth ma on osobną głośność niż „Połączenie”. */
+    fun stream(ctx: Context): Int {
+        val a = am(ctx)
+        val bt = try {
+            if (Build.VERSION.SDK_INT >= 31) a.communicationDevice?.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            else @Suppress("DEPRECATION") a.isBluetoothScoOn
+        } catch (_: Exception) { false }
+        if (!bt) return AudioManager.STREAM_VOICE_CALL
+        return try { if (a.getStreamMaxVolume(STREAM_BT_SCO) > 0) STREAM_BT_SCO else AudioManager.STREAM_VOICE_CALL } catch (_: Exception) { AudioManager.STREAM_VOICE_CALL }
+    }
     private val GAINS = listOf(1f, 2f, 3f, 4f, 6f, 8f)
     private val MIC = listOf(0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f)
     private fun fmt(v: Float) = if (v == v.toInt().toFloat()) v.toInt().toString() else v.toString()
     private fun am(ctx: Context) = ctx.getSystemService(AudioManager::class.java)
 
     fun up(ctx: Context) {
-        val a = am(ctx); val cur = a.getStreamVolume(VC); val max = a.getStreamMaxVolume(VC)
-        if (cur < max) a.setStreamVolume(VC, cur + 1, 0)
+        val a = am(ctx); val st = stream(ctx); val cur = a.getStreamVolume(st); val max = a.getStreamMaxVolume(st)
+        if (cur < max) { try { a.setStreamVolume(st, cur + 1, 0) } catch (_: Exception) {}; remember(ctx) }
         else GAINS.firstOrNull { it > Prefs.gain.toFloat() + 0.01f }?.let { setGain(it) }
     }
 
     fun down(ctx: Context) {
         val a = am(ctx); val g = Prefs.gain.toFloat()
         if (g > 3.01f) GAINS.lastOrNull { it < g - 0.01f }?.let { setGain(it) }
-        else a.setStreamVolume(VC, (a.getStreamVolume(VC) - 1).coerceAtLeast(1), 0)
+        else { val st = stream(ctx); try { a.setStreamVolume(st, (a.getStreamVolume(st) - 1).coerceAtLeast(1), 0) } catch (_: Exception) {}; remember(ctx) }
+    }
+
+    /** Zapamiętuje głośność rozmowy ustawioną przez użytkownika – kolejna sesja zaczyna od niej, a nie od maksimum. */
+    fun remember(ctx: Context) {
+        try { Prefs.voiceVol = am(ctx).getStreamVolume(AudioManager.STREAM_VOICE_CALL) } catch (_: Exception) {}
     }
 
     private fun setGain(g: Float) { Prefs.sp.edit().putString("gain", fmt(g)).apply(); Engine.onSettingChanged("gain") }
 
     fun label(ctx: Context): String {
-        val a = am(ctx); val pct = a.getStreamVolume(VC) * 100 / a.getStreamMaxVolume(VC).coerceAtLeast(1)
+        val a = am(ctx); val st = stream(ctx); val pct = a.getStreamVolume(st) * 100 / a.getStreamMaxVolume(st).coerceAtLeast(1)
         val g = Prefs.gain.toFloat()
         return "Głośność $pct%" + if (g > 3.01f) " + ${fmt(g)}×" else ""
     }

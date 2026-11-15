@@ -27,6 +27,12 @@ object Prefs {
 
     // ---------- ustawienia ----------
     val cid: String get() = sp.getString("cid", "") ?: ""
+    /** Stały token tej instalacji dla serwera sygnalizacyjnego – pozwala wrócić pod własny identyfikator po zerwaniu sieci. */
+    val sigToken: String get() = sp.getString("sig_token", null) ?: genCode(16).lowercase().also { sp.edit().putString("sig_token", it).apply() }
+    /** Ostatnio ustawiona głośność rozmowy (-1 = jeszcze nie ustawiano). */
+    var voiceVol: Int
+        get() = sp.getInt("voice_vol", -1)
+        set(v) = sp.edit().putInt("voice_vol", v).apply()
     var athName: String
         get() = sp.getString("ath_name", "") ?: ""
         set(v) = sp.edit().putString("ath_name", v).apply()
@@ -96,6 +102,11 @@ object Prefs {
         val a = JSONArray(); list.take(30).forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
         sp.edit().putString("hist_$code", a.toString()).apply()
     }
+    fun moveHistory(from: String, to: String) {
+        val raw = sp.getString("hist_$from", null) ?: return
+        sp.edit().putString("hist_$to", raw).remove("hist_$from").apply()
+    }
+    fun dropHistory(code: String) = sp.edit().remove("hist_$code").apply()
     fun removeHistory(code: String, cid: String) {
         val a = JSONArray(); history(code).filter { it.cid != cid }.forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
         sp.edit().putString("hist_$code", a.toString()).apply()

@@ -22,8 +22,9 @@ class SessionService : LifecycleService() {
         private const val ID = 7
         @Volatile var running = false; private set
 
-        fun start(ctx: Context, coach: Boolean) =
-            ContextCompat.startForegroundService(ctx, Intent(ctx, SessionService::class.java).putExtra("coach", coach))
+        /** [camera] – czy jest zgoda na kamerę (bez niej usługa nie może zadeklarować typu „kamera”). */
+        fun start(ctx: Context, coach: Boolean, camera: Boolean) =
+            ContextCompat.startForegroundService(ctx, Intent(ctx, SessionService::class.java).putExtra("coach", coach).putExtra("camera", camera))
 
         fun refresh(ctx: Context) {
             if (running) ctx.startService(Intent(ctx, SessionService::class.java).setAction("REFRESH"))
@@ -36,14 +37,26 @@ class SessionService : LifecycleService() {
             CamRec.stopRec()
             Prefs.clearSession()
             Engine.stop()
-            mainHandler.postDelayed({ app.stopService(Intent(app, SessionService::class.java)) }, if (wasRec) 2500 else 600)
-            mainHandler.postDelayed({ StandbyService.ensure(app) }, if (wasRec) 4000 else 2000)
+            if (wasRec && running) try { app.startService(Intent(app, SessionService::class.java).setAction("SAVING")) } catch (_: Exception) {}
+            // usługa zostaje przy życiu, dopóki nagranie nie zostanie zapisane w Galerii – system nie zabije aplikacji w połowie zapisu
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            val stopper = object : Runnable {
+                override fun run() {
+                    if (Engine.active) return   // w międzyczasie zaczęła się nowa sesja – usługa jest jej potrzebna
+                    val busy = CamRec.recording != null || CamRec.muxing
+                    if (busy && android.os.SystemClock.elapsedRealtime() - t0 < 15 * 60_000) { mainHandler.postDelayed(this, 500); return }
+                    app.stopService(Intent(app, SessionService::class.java))
+                }
+            }
+            mainHandler.postDelayed(stopper, 700)
+            mainHandler.postDelayed({ StandbyService.ensure(app) }, 2000)
         }
     }
 
     private var wl: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
     private var coach = false
+    private var camera = false
     private val ui = Engine.Ui { updateNotification() }
 
     override fun onCreate() {
@@ -59,17 +72,23 @@ class SessionService : LifecycleService() {
             "QUIT" -> { AppExit.quit(this); return START_NOT_STICKY }
             "REC" -> { if (CamRec.recording != null) CamRec.stopRec() else CamRec.startRec(this); return START_NOT_STICKY }
             "REFRESH" -> { updateNotification(); return START_NOT_STICKY }
+            "SAVING" -> {
+                getSystemService(android.app.NotificationManager::class.java).notify(ID, NotificationCompat.Builder(this, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_notif).setContentTitle("Trener na wodzie")
+                    .setContentText("Zapisuję nagranie w Galerii…").setOngoing(true).setOnlyAlertOnce(true).setProgress(0, 0, true).build())
+                return START_NOT_STICKY
+            }
         }
         coach = intent?.getBooleanExtra("coach", false) ?: false
+        camera = intent?.getBooleanExtra("camera", false) ?: false
         val n = buildNotification()
         if (Build.VERSION.SDK_INT >= 30) {
-            val type = if (coach) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                       else ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or (if (camera) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
             startForeground(ID, n, type)
         } else startForeground(ID, n)
         acquireLocks()
         Controls.start(this)
-        if (coach) CamRec.bind(this, this)
+        if (coach && camera) CamRec.bind(this, this)
         return START_NOT_STICKY
     }
 
@@ -102,7 +121,7 @@ class SessionService : LifecycleService() {
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (coach) b.addAction(0, if (CamRec.recording != null) "⏹ Stop nagrywania" else "⏺ Nagrywaj", pi("REC", 1))
+        if (coach && camera) b.addAction(0, if (CamRec.recording != null) "⏹ Stop nagrywania" else "⏺ Nagrywaj", pi("REC", 1))
         b.addAction(0, "Zakończ", pi("STOP", 2))
         b.addAction(0, "Zamknij aplikację", pi("QUIT", 3))
         return b.build()

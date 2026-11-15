@@ -35,6 +35,8 @@ class App : Application() {
         nm.createNotificationChannel(NotificationChannel(SessionService.CHANNEL, "Sesja treningowa", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(UpdateReceiver.CHANNEL, "Aktualizacje", NotificationManager.IMPORTANCE_DEFAULT))
         StandbyService.channels(this)
+        // dokończenie zapisu nagrań przerwanych w poprzedniej sesji (zamknięcie aplikacji, brak miejsca)
+        mainHandler.postDelayed({ try { CamRec.recover(this) } catch (_: Exception) {} }, 1500)
     }
 }
 
@@ -110,18 +112,38 @@ object AudioRouter {
     private var cb: AudioDeviceCallback? = null
     private var prevMode = AudioManager.MODE_NORMAL
     private var focus: android.media.AudioFocusRequest? = null
+    private var modeListener: Any? = null
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { ch ->
+        // po zwykłej rozmowie telefonicznej system oddaje nam dźwięk – przywracamy tryb rozmowy i słuchawki
+        if (ch == AudioManager.AUDIOFOCUS_GAIN) mainHandler.postDelayed({ reassert() }, 700)
+    }
+
+    private fun reassert() {
+        val a = am ?: return
+        try { if (a.mode == AudioManager.MODE_NORMAL) a.mode = AudioManager.MODE_IN_COMMUNICATION } catch (_: Exception) {}
+        apply()
+    }
 
     fun start(ctx: Context) {
         val a = ctx.getSystemService(AudioManager::class.java); am = a
         prevMode = a.mode
         a.mode = AudioManager.MODE_IN_COMMUNICATION
-        // głośność rozmowy na maksimum – głos na wodzie musi być dobrze słyszalny
-        try { a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0) } catch (_: Exception) {}
+        // głośność rozmowy: ostatnio ustawiona przez użytkownika; przy pierwszym użyciu maksimum (na wodzie musi być słychać)
+        try {
+            val max = a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            val saved = Prefs.voiceVol
+            a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, if (saved in 1..max) saved else max, 0)
+        } catch (_: Exception) {}
         try {
             val f = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build()).build()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setOnAudioFocusChangeListener(focusListener, mainHandler).build()
             a.requestAudioFocus(f); focus = f
+        } catch (_: Exception) {}
+        if (Build.VERSION.SDK_INT >= 31) try {
+            val l = AudioManager.OnModeChangedListener { m -> if (m == AudioManager.MODE_NORMAL) mainHandler.postDelayed({ reassert() }, 1000) }
+            a.addOnModeChangedListener(androidx.core.content.ContextCompat.getMainExecutor(ctx), l); modeListener = l
         } catch (_: Exception) {}
         apply()
         cb = object : AudioDeviceCallback() {
@@ -134,6 +156,9 @@ object AudioRouter {
     fun stop() {
         val a = am ?: return
         cb?.let { a.unregisterAudioDeviceCallback(it) }; cb = null
+        if (Build.VERSION.SDK_INT >= 31) try { (modeListener as? AudioManager.OnModeChangedListener)?.let { a.removeOnModeChangedListener(it) } } catch (_: Exception) {}
+        modeListener = null
+        try { val v = a.getStreamVolume(AudioManager.STREAM_VOICE_CALL); if (v > 0) Prefs.voiceVol = v } catch (_: Exception) {}
         focus?.let { try { a.abandonAudioFocusRequest(it) } catch (_: Exception) {} }; focus = null
         try {
             if (Build.VERSION.SDK_INT >= 31) a.clearCommunicationDevice()

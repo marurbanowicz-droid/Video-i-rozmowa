@@ -35,6 +35,16 @@ object Engine {
     enum class Role { NONE, COACH, ATHLETE }
 
     const val PREFIX = "trener-na-wodzie-v1-"
+
+    /**
+     * Wiadomość „pozapołączeniowa” (dzwonienie, odrzucenie). Serwer PeerJS przepuszcza tylko OFFER typu media/data
+     * z poprawnie wyglądającym SDP – inne odrzuca i rozłącza nadawcę (sprawdzone doświadczalnie), więc właściwa treść
+     * jedzie w polu metadata.
+     */
+    fun notePayload(meta: JSONObject): JSONObject = JSONObject()
+        .put("sdp", JSONObject().put("type", "offer").put("sdp", "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"))
+        .put("type", "data").put("connectionId", "dc_" + Prefs.genCode(12).lowercase())
+        .put("label", "note").put("reliable", true).put("serialization", "json").put("metadata", meta)
     private const val TAG = "Engine"
 
     lateinit var app: Context
@@ -51,6 +61,9 @@ object Engine {
 
     // ---------------- stan publiczny (czytany przez UI) ----------------
     @Volatile var role = Role.NONE; private set
+    /** Ustawiane od razu przy starcie sesji – zanim wątek silnika zdąży zmienić [role]. */
+    @Volatile private var starting = false
+    val active: Boolean get() = role != Role.NONE || starting
     @Volatile var signalOpen = false; private set
     @Volatile var micOn = true; private set
     /** Wyciszenie wszystkiego: nic nie wysyłamy i nic nie słychać. */
@@ -130,6 +143,8 @@ object Engine {
     private var athBadSince = 0L
     private var athDataT = 0L
     private var athKbps = 32
+    private var athCoachMissing = 0
+    private var athNextCall = 0L
     /** Połączenia głosowe zawodnik ↔ zawodnik (każdy z każdym). Klucz: cid drugiego zawodnika. */
     private val mesh = HashMap<String, Link>()
 
@@ -139,8 +154,11 @@ object Engine {
     // =====================================================================
     // START / STOP
     // =====================================================================
-    fun startCoach() = exec.execute {
-        if (role != Role.NONE) return@execute
+    fun startCoach() { starting = true; exec.execute { try { startCoachNow() } finally { starting = false } } }
+
+    private fun startCoachNow() {
+        if (role != Role.NONE) return
+        StandbyService.releaseIds()   // czuwanie zwalnia identyfikatory pokoi, zanim sesja je zajmie
         role = Role.COACH; micOn = true; fullMute = false; pttActive = false; resetStats()
         try { initRtc(Prefs.coachNoise, Prefs.coachWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); Notifier.toast("Błąd audio: ${e.message}") }
         startLoopback()
@@ -148,20 +166,27 @@ object Engine {
         connectSignal(PREFIX + Prefs.currentRoom().code)
         timers += exec.scheduleAtFixedRate({ safe { checkAthletes() } }, 2, 2, TimeUnit.SECONDS)
         timers += exec.scheduleAtFixedRate({ safe { broadcastRoster() } }, 10, 10, TimeUnit.SECONDS)
-        timers += exec.scheduleAtFixedRate({ safe { pollStats(); Prefs.touchSession() } }, 2, 2, TimeUnit.SECONDS)
+        timers += exec.scheduleAtFixedRate({ safe { pollStats() } }, 2, 2, TimeUnit.SECONDS)
+        timers += exec.scheduleAtFixedRate({ safe { Prefs.touchSession() } }, 60, 60, TimeUnit.SECONDS)
         changed()
     }
 
-    fun startAthlete(code: String, name: String) = exec.execute {
-        if (role != Role.NONE) return@execute
+    fun startAthlete(code: String, name: String) { starting = true; exec.execute { try { startAthleteNow(code, name) } finally { starting = false } } }
+
+    private fun startAthleteNow(code: String, name: String) {
+        if (role != Role.NONE) return
+        StandbyService.releaseIds()
         role = Role.ATHLETE; fullMute = false; pttActive = false; resetStats()
+        athPeerId = "tnw-" + Prefs.cid.lowercase() + "-" + Prefs.genCode(4).lowercase()
         athCode = code; athName = name; athRoomName = ""; athLink = false; athEverLinked = false
         athRosterMap = null; athRoster = emptyList(); athStatus = "Łączenie z serwerem…"; athMuted = false; athCross = false
+        athCoachMissing = 0; athNextCall = 0
         try { initRtc(Prefs.athNoise, Prefs.athWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); athStatus = "Błąd mikrofonu: ${e.message}" }
         ice = buildIce()
-        connectSignal(newAthId())
+        connectSignal(athPeerId)
         timers += exec.scheduleAtFixedRate({ safe { athWatchdog() } }, 3, 3, TimeUnit.SECONDS)
-        timers += exec.scheduleAtFixedRate({ safe { pollStats(); Prefs.touchSession() } }, 2, 2, TimeUnit.SECONDS)
+        timers += exec.scheduleAtFixedRate({ safe { pollStats() } }, 2, 2, TimeUnit.SECONDS)
+        timers += exec.scheduleAtFixedRate({ safe { Prefs.touchSession() } }, 60, 60, TimeUnit.SECONDS)
         changed()
     }
 
@@ -210,7 +235,7 @@ object Engine {
         }
         val a = JavaAudioDeviceModule.builder(app)
             .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(ns)
+            .setUseHardwareNoiseSuppressor(ns && role == Role.ATHLETE)
             // surowy dźwięk z mikrofonu: najpierw kopia do nagrania (bez wzmocnienia), potem wzmocnienie wysyłanego głosu
             .setAudioRecordDataCallback { format, channels, rate, buf -> onMicData(format, channels, rate, buf) }
             .createAudioDeviceModule()
@@ -267,7 +292,7 @@ object Engine {
         )
         val url = Prefs.turnUrl
         if (url.isNotEmpty()) try {
-            val body = PeerSignal.http.newCall(Request.Builder().url(url).build()).execute().use { it.body?.string() } ?: ""
+            val body = PeerSignal.httpQuick.newCall(Request.Builder().url(url).build()).execute().use { it.body?.string() } ?: ""
             val arr = if (body.trim().startsWith("[")) JSONArray(body) else JSONObject(body).optJSONArray("iceServers") ?: JSONArray()
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
@@ -286,7 +311,9 @@ object Engine {
     // =====================================================================
     // SYGNALIZACJA
     // =====================================================================
-    private fun newAthId() = "tnw-" + Prefs.cid.lowercase() + "-" + Prefs.genCode(4).lowercase()
+    /** Identyfikator zawodnika na serwerze – stały przez całą sesję, żeby inni zawodnicy zawsze mogli się połączyć. */
+    private var athPeerId = ""
+    private var lastIdTakenToast = 0L
     private fun coachPeerId() = PREFIX + athCode
 
     private fun connectSignal(id: String) {
@@ -297,11 +324,19 @@ object Engine {
             override fun onOpen() {
                 if (signal !== s) return
                 signalOpen = true; changed()
-                if (role == Role.ATHLETE) { athCall(); athConnectData() }
+                if (role == Role.ATHLETE) {
+                    // po powrocie sygnalizacji nie zrywamy działającej rozmowy – dzwonimy tylko, gdy jej nie ma
+                    val m = athMedia
+                    if (m == null || !isUp(m)) athCall()
+                    if (athData?.dc?.state() != DataChannel.State.OPEN) athConnectData()
+                }
             }
             override fun onIdTaken() {
                 if (signal !== s) return
-                if (role == Role.COACH) Notifier.toast("Pokój jeszcze zajęty przez poprzednią sesję – ponawiam…")
+                if (role == Role.COACH && now() - lastIdTakenToast > 30_000) {
+                    lastIdTakenToast = now()
+                    Notifier.toast("Ten pokój jest otwarty na innym urządzeniu (np. na stronie) – zamknij go tam. Ponawiam…")
+                }
             }
             override fun onMessage(type: String, src: String?, payload: JSONObject?) {
                 if (signal !== s) return
@@ -322,7 +357,7 @@ object Engine {
         reconnectF = exec.schedule(Runnable {
             safe {
                 if (role != Role.NONE && !signalOpen)
-                    connectSignal(if (role == Role.COACH) PREFIX + Prefs.currentRoom().code else newAthId())
+                    connectSignal(if (role == Role.COACH) PREFIX + Prefs.currentRoom().code else athPeerId)
             }
         }, 4, TimeUnit.SECONDS)
     }
@@ -330,9 +365,12 @@ object Engine {
     private fun onSignal(type: String, src: String?, p: JSONObject?) {
         when (type) {
             "OFFER" -> if (src != null && p != null) {
-                val t = p.optString("type")
-                if (t == "ring-decline") { if (role == Role.COACH) Notifier.event("leave", "${p.optString("name").ifEmpty { "Zawodnik" }} odrzuca połączenie"); return }
-                if (t == "ring") return
+                val md = p.optJSONObject("metadata")
+                if (md?.optBoolean("ringDecline") == true) {
+                    if (role == Role.COACH) Notifier.event("leave", "${md.optString("name").ifEmpty { "Zawodnik" }} odrzuca połączenie")
+                    return
+                }
+                if (md?.has("ring") == true) return
                 if (role == Role.COACH) onOffer(src, p)
                 else if (role == Role.ATHLETE && p.optJSONObject("metadata")?.optBoolean("mesh") == true) onMeshOffer(src, p)
             }
@@ -354,7 +392,10 @@ object Engine {
                 mesh.entries.filter { it.value.peer == src }.map { it.key to it.value }.forEach { (k, v) -> closeLink(v); mesh.remove(k) }
                 refreshMeshUp()
             } else if (role == Role.ATHLETE && src == coachPeerId()) {
+                // trenera nie ma na serwerze (serwer nie kolejkuje wiadomości) – ponawiamy coraz rzadziej, do 10 s
                 closeLink(athMedia); athMedia = null; closeLink(athData); athData = null
+                athCoachMissing = (athCoachMissing + 1).coerceAtMost(14)
+                athNextCall = now() + (3000L + 500L * athCoachMissing).coerceAtMost(10_000L)
                 if (!athLink) { athStatus = "Trener jeszcze nie jest online – czekam…"; changed() }
             }
             "LEAVE" -> if (src != null) {
@@ -627,7 +668,7 @@ object Engine {
     }
 
     private fun goOffline(a: Athlete) {
-        if (a.status == "offline") return
+        if (a.status == "offline") { val m = a.media; a.media = null; a.remote = null; closeLink(m); return }
         val prev = a.status
         val m = a.media; a.media = null; a.remote = null; closeLink(m)
         if (prev == "connecting" && !a.wasOnline) { dropAthlete(a.cid); return }
@@ -696,8 +737,8 @@ object Engine {
         for (s in list) {
             val id = "tnw-a-" + s.cid.lowercase()
             pendingRings[id] = s.name
-            signal?.send("OFFER", id, JSONObject().put("type", "ring").put("connectionId", "ring_" + rnd())
-                .put("room", r.code).put("roomName", r.name).put("turn", Prefs.turnUrl))
+            signal?.send("OFFER", id, notePayload(JSONObject().put("ring",
+                JSONObject().put("room", r.code).put("roomName", r.name).put("turn", Prefs.turnUrl))))
         }
         Notifier.toast("Dzwonię do: " + list.joinToString { it.name })
     }
@@ -747,8 +788,9 @@ object Engine {
         val m = athMedia
         if (signalOpen) {
             val dataOk = athData?.dc?.state() == DataChannel.State.OPEN
-            if (!dataOk && now() - athDataT > 8000) athConnectData()
-            if (m == null) { athCall(); return }
+            val mayCall = now() >= athNextCall
+            if (!dataOk && now() - athDataT > 8000 && mayCall) athConnectData()
+            if (m == null) { if (mayCall) athCall(); return }
         }
         if (m == null) { setLink(false); return }
         val st = m.ice
@@ -763,6 +805,7 @@ object Engine {
         if (up == athLink) return
         athLink = up
         if (up) {
+            athCoachMissing = 0; athNextCall = 0
             athStatus = "Połączono z trenerem"
             if (athEverLinked) Notifier.event("back", "Połączenie z trenerem przywrócone") else Notifier.beep("join")
             athEverLinked = true

@@ -51,6 +51,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var shutter: ShutterButton
     private var rangeKey = ""
     private var landscape = false
+    private var listSig = ""
+    private val camCb: () -> Unit = { syncZoom(); refresh() }
+    /** Obrót o 180° (poziomo w lewo ↔ w prawo) nie zmienia konfiguracji ekranu – wykrywamy go tutaj, żeby film nie był do góry nogami. */
+    private val displayListener = object : android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) { CamRec.setRotation(rot()) }
+    }
     private val ticker = object : Runnable { override fun run() { updateRecTime(); mainHandler.postDelayed(this, 500) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,8 +69,13 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { moveTaskToBack(true); Notifier.toast("Sesja działa w tle. Zakończysz ją w ustawieniach lub w powiadomieniu.") }
         })
-        CamRec.onChange = { syncZoom(); refresh() }
+        CamRec.onChange = camCb
         askBatteryOnce()
+    }
+
+    override fun onDestroy() {
+        if (CamRec.onChange === camCb) CamRec.onChange = null
+        super.onDestroy()
     }
 
     override fun onStart() {
@@ -70,12 +83,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         Engine.addUi(this)
         CamRec.setSurface(preview.surfaceProvider)
         CamRec.setRotation(rot())
+        try { getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(displayListener, mainHandler) } catch (_: Exception) {}
         mainHandler.post(ticker)
         syncZoom()
     }
 
     override fun onStop() {
         Engine.removeUi(this)
+        try { getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) } catch (_: Exception) {}
         CamRec.setSurface(null)
         mainHandler.removeCallbacks(ticker)
         super.onStop()
@@ -126,6 +141,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildUi() {
+        listSig = ""
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         if (!::preview.isInitialized) preview = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
@@ -323,7 +339,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         val on = !Prefs.coachNoise
         Prefs.sp.edit().putBoolean("coach_noise", on).apply()
         Engine.onSettingChanged("coach_noise")
-        Notifier.toast(if (on) "Redukcja szumów włączona (może przytłumić sygnał startu)" else "Redukcja szumów wyłączona")
+        Notifier.toast(if (on) "Redukcja szumów w rozmowie włączona (nagranie bez zmian)" else "Redukcja szumów wyłączona")
         refresh()
     }
 
@@ -335,7 +351,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     }
 
     override fun onEngineChanged() {
-        if (Engine.role == Engine.Role.NONE) { finish(); return }
+        if (!Engine.active) { finish(); return }
         refresh()
     }
 
@@ -363,7 +379,12 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         muteBanner.visibility = if (Engine.fullMute) View.VISIBLE else View.GONE
         spkBtn.setImageResource(if (Engine.fullMute) R.drawable.ic_volume_off else if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
         shutter.recording = CamRec.recording != null
-        // zawodnicy – każdy z osobnym wyciszeniem
+        updateRecTime()
+        // zawodnicy – każdy z osobnym wyciszeniem. Listę przebudowujemy tylko, gdy coś się w niej zmieniło:
+        // odświeżanie co 2 s (licznik danych) podmieniałoby przyciski pod palcem i gubiło dotknięcia.
+        val sig = r.code + "#" + all.joinToString("|") { "${it.cid}:${it.name}:${it.status}:${it.muted}" }
+        if (sig == listSig) return
+        listSig = sig
         athList.removeAllViews()
         val onlineIds = all.filter { it.status == "online" }.map { it.cid }.toSet()
         if (Prefs.history(r.code).any { it.cid !in onlineIds }) {
@@ -449,7 +470,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 if (sel.isEmpty()) Notifier.toast("Nikogo nie wybrano") else Engine.ring(sel)
             }
             .setNeutralButton("Usuń zaznaczone z listy") { _, _ ->
-                list.filterIndexed { i, _ -> checked[i] }.forEach { Prefs.removeHistory(r.code, it.cid) }; refresh()
+                list.filterIndexed { i, _ -> checked[i] }.forEach { Prefs.removeHistory(r.code, it.cid) }; listSig = ""; refresh()
             }
             .setNegativeButton("Anuluj", null).show()
     }
@@ -522,16 +543,17 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                     val c = Prefs.sanitizeCode(v)
                     val rs = Prefs.loadRooms()
                     when {
+                        c == r.code -> {}
                         c.length < 4 -> Notifier.toast("Kod musi mieć co najmniej 4 znaki")
                         rs.any { it.code == c && it.code != r.code } -> Notifier.toast("Taki pokój już istnieje")
-                        else -> confirmDrop { rs.first { it.code == r.code }.code = c; Prefs.saveRooms(rs); Engine.switchRoom(c) }
+                        else -> confirmDrop { rs.first { it.code == r.code }.code = c; Prefs.saveRooms(rs); Prefs.moveHistory(r.code, c); Engine.switchRoom(c) }
                     }
                 }
                 4 -> {
                     val rs = Prefs.loadRooms()
                     if (rs.size < 2) Notifier.toast("To jedyny pokój – najpierw utwórz inny")
                     else MaterialAlertDialogBuilder(this).setMessage("Usunąć pokój „${r.name}” (${r.code})?")
-                        .setPositiveButton("Usuń") { _, _ -> confirmDrop { val left = rs.filter { it.code != r.code }; Prefs.saveRooms(left); Engine.switchRoom(left[0].code) } }
+                        .setPositiveButton("Usuń") { _, _ -> confirmDrop { val left = rs.filter { it.code != r.code }; Prefs.saveRooms(left); Prefs.dropHistory(r.code); Engine.switchRoom(left[0].code) } }
                         .setNegativeButton("Anuluj", null).show()
                 }
             }

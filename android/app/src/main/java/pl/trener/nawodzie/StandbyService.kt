@@ -49,7 +49,12 @@ class StandbyService : Service() {
             })
         }
 
-        fun wanted(): Boolean = Engine.role == Engine.Role.NONE && !Prefs.standbyPaused &&
+        @Volatile private var inst: StandbyService? = null
+
+        /** Wywoływane na wątku silnika tuż przed startem sesji: czuwanie natychmiast zwalnia swoje identyfikatory. */
+        fun releaseIds() { inst?.closeAll() }
+
+        fun wanted(): Boolean = !Engine.active && !Prefs.standbyPaused &&
             ((Prefs.standbyCoach && Prefs.wasCoach) || (Prefs.standbyAth && Prefs.wasAthlete))
 
         /** Uruchamia lub zatrzymuje czuwanie zależnie od ustawień i stanu sesji. */
@@ -74,7 +79,7 @@ class StandbyService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        running = true
+        running = true; inst = this
         channels(this)
         netCb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { Engine.exec.execute { reconnectNow() } }
@@ -127,8 +132,13 @@ class StandbyService : Service() {
         return m
     }
 
+    private fun closeAll() {
+        signals.values.forEach { it.close() }; signals.clear()
+        retries.values.forEach { it.cancel(false) }; retries.clear()
+    }
+
     private fun sync() {
-        if (!running) return
+        if (!running || !wanted()) return
         val want = desiredIds()
         for (id in signals.keys.toList()) if (id !in want) { signals.remove(id)?.close(); retries.remove(id)?.cancel(false) }
         for ((id, kind) in want) if (signals[id] == null && retries[id] == null) connect(id, kind)
@@ -136,10 +146,11 @@ class StandbyService : Service() {
 
     private fun connect(id: String, kind: String) {
         retries.remove(id)
+        if (!running || !wanted()) return
         lateinit var s: PeerSignal
         s = PeerSignal(id, object : PeerSignal.Listener {
             override fun onOpen() { backoff[id] = 0 }
-            override fun onIdTaken() { /* pokój zajęty np. przez inną sesję – spróbujemy później */ }
+            override fun onIdTaken() { /* pokój otwarty na innym urządzeniu – spróbujemy później */ }
             override fun onMessage(type: String, src: String?, payload: JSONObject?) {
                 if (signals[id] !== s || src == null || payload == null) return
                 if (type == "OFFER") onOffer(kind, src, payload)
@@ -148,7 +159,7 @@ class StandbyService : Service() {
                 if (signals[id] !== s) return
                 signals.remove(id); scheduleRetry(id, kind)
             }
-        }, heartbeatSec = 25)
+        }, heartbeatSec = 25, pingSec = 25)
         signals[id] = s
         s.connect()
     }
@@ -172,7 +183,7 @@ class StandbyService : Service() {
             val code = kind.removePrefix("room:")
             val md = p.optJSONObject("metadata")
             val name = md?.optString("name")?.ifEmpty { null } ?: "Zawodnik"
-            if (md?.optBoolean("mesh") == true) return
+            if (md?.optBoolean("mesh") == true || md?.has("ring") == true || md?.optBoolean("ringDecline") == true) return
             val key = code + "|" + (md?.optString("cid") ?: src)
             val now = System.currentTimeMillis()
             if (now - (lastJoinNotif[key] ?: 0L) < 120_000) return
@@ -187,11 +198,12 @@ class StandbyService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true).setContentIntent(pi).setTimeoutAfter(15 * 60_000L).build()
             notify(100 + (key.hashCode() and 0xfff), n)
-        } else if (kind == "ath" && p.optString("type") == "ring") {
-            val code = Prefs.sanitizeCode(p.optString("room"))
+        } else if (kind == "ath") {
+            val ring = p.optJSONObject("metadata")?.optJSONObject("ring") ?: return
+            val code = Prefs.sanitizeCode(ring.optString("room"))
             if (code.length < 4) return
-            val roomName = p.optString("roomName").ifEmpty { code }
-            p.optString("turn").takeIf { it.isNotBlank() }?.let { Prefs.sp.edit().putString("turn_url", it).apply() }
+            val roomName = ring.optString("roomName").ifEmpty { code }
+            ring.optString("turn").takeIf { it.isNotBlank() }?.let { Prefs.sp.edit().putString("turn_url", it).apply() }
             val answer = PendingIntent.getActivity(this, 50, Intent(this, MainActivity::class.java)
                 .putExtra("join_room", code).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val decline = PendingIntent.getService(this, 51, Intent(this, StandbyService::class.java)
@@ -216,13 +228,13 @@ class StandbyService : Service() {
     private fun sendDecline(room: String) {
         val s = signals[Prefs.standbyId()] ?: return
         if (!s.open) return
-        s.send("OFFER", Engine.PREFIX + room, JSONObject().put("type", "ring-decline").put("connectionId", "ring_" + Prefs.genCode(8))
-            .put("name", Prefs.athName.ifEmpty { "Zawodnik" }).put("cid", Prefs.cid))
+        s.send("OFFER", Engine.PREFIX + room, Engine.notePayload(JSONObject().put("ringDecline", true)
+            .put("name", Prefs.athName.ifEmpty { "Zawodnik" }).put("cid", Prefs.cid)))
     }
 
     override fun onDestroy() {
-        running = false
-        Engine.exec.execute { signals.values.forEach { it.close() }; signals.clear(); retries.values.forEach { it.cancel(false) }; retries.clear() }
+        running = false; if (inst === this) inst = null
+        Engine.exec.execute { closeAll() }
         netCb?.let { try { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }
         try { wl?.release() } catch (_: Exception) {}
         super.onDestroy()
