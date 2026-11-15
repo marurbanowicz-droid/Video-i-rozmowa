@@ -72,7 +72,26 @@ object Prefs {
         get() = sp.getBoolean("speaker", false)
         set(v) = sp.edit().putBoolean("speaker", v).apply()
 
+    // ---------- kamera ----------
+    val aspect: String get() = sp.getString("aspect", "4:3") ?: "4:3"
+    val watermark get() = sp.getBoolean("watermark", true)
+    var evIndex: Int
+        get() = sp.getInt("ev_index", 0)
+        set(v) = sp.edit().putInt("ev_index", v).apply()
+
+    // ---------- głośności ustawione dla konkretnego zawodnika (1.0 = bez zmian) ----------
+    fun athRecvVol(cid: String) = sp.getFloat("rv_$cid", 1f)
+    fun athSendVol(cid: String) = sp.getFloat("sv_$cid", 1f)
+    fun setAthRecvVol(cid: String, v: Float) = sp.edit().putFloat("rv_$cid", v).apply()
+    fun setAthSendVol(cid: String, v: Float) = sp.edit().putFloat("sv_$cid", v).apply()
+
     // ---------- czuwanie w tle ----------
+    const val STANDBY_MS = 2 * 3600_000L
+    /** Koniec (lub początek) ostatniej sesji – czuwanie działa przez 2 godziny od tej chwili. */
+    var lastSession: Long
+        get() = sp.getLong("last_session", 0L)
+        set(v) = sp.edit().putLong("last_session", v).apply()
+    val standbyUntil: Long get() = lastSession + STANDBY_MS
     val standbyCoach get() = sp.getBoolean("standby_coach", true)
     val standbyAth get() = sp.getBoolean("standby_ath", true)
     /** Ustawiane przez „Zamknij aplikację” – czuwanie nie startuje, dopóki użytkownik nie otworzy aplikacji. */

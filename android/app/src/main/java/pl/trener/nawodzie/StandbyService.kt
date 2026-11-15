@@ -54,7 +54,7 @@ class StandbyService : Service() {
         /** Wywoływane na wątku silnika tuż przed startem sesji: czuwanie natychmiast zwalnia swoje identyfikatory. */
         fun releaseIds() { inst?.closeAll() }
 
-        fun wanted(): Boolean = !Engine.active && !Prefs.standbyPaused &&
+        fun wanted(): Boolean = !Engine.active && !Prefs.standbyPaused && System.currentTimeMillis() < Prefs.standbyUntil &&
             ((Prefs.standbyCoach && Prefs.wasCoach) || (Prefs.standbyAth && Prefs.wasAthlete))
 
         /** Uruchamia lub zatrzymuje czuwanie zależnie od ustawień i stanu sesji. */
@@ -74,6 +74,8 @@ class StandbyService : Service() {
     private val lastJoinNotif = HashMap<String, Long>()
     private var wl: PowerManager.WakeLock? = null
     private var netCb: ConnectivityManager.NetworkCallback? = null
+
+    private val expiry = Runnable { if (!wanted()) stopSelf() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -106,6 +108,9 @@ class StandbyService : Service() {
         if (wl == null) wl = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "TrenerNaWodzie:standby").apply { setReferenceCounted(false); acquire() }
         Engine.exec.execute { sync() }
+        // czuwanie wyłącza się samo 2 godziny po ostatniej sesji (oszczędzanie baterii)
+        mainHandler.removeCallbacks(expiry)
+        mainHandler.postDelayed(expiry, (Prefs.standbyUntil - System.currentTimeMillis()).coerceAtLeast(1000) + 500)
         return START_STICKY
     }
 
@@ -117,7 +122,7 @@ class StandbyService : Service() {
         return NotificationCompat.Builder(this, CH_STANDBY)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("Trener na wodzie – czuwanie")
-            .setContentText(parts.joinToString("; ").replaceFirstChar { it.uppercase() })
+            .setContentText("Do " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(Prefs.standbyUntil)) + ": " + parts.joinToString("; "))
             .setOngoing(true).setContentIntent(open).setPriority(NotificationCompat.PRIORITY_MIN)
             .addAction(0, "Zamknij aplikację", PendingIntent.getService(this, 41, Intent(this, StandbyService::class.java).setAction("QUIT"),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
@@ -234,6 +239,7 @@ class StandbyService : Service() {
 
     override fun onDestroy() {
         running = false; if (inst === this) inst = null
+        mainHandler.removeCallbacks(expiry)
         Engine.exec.execute { closeAll() }
         netCb?.let { try { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }
         try { wl?.release() } catch (_: Exception) {}

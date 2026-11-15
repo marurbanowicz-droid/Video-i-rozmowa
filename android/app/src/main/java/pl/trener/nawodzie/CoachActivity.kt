@@ -37,7 +37,8 @@ import kotlin.math.abs
 class CoachActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var preview: PreviewView
     private lateinit var statusPill: TextView
-    private lateinit var dataTxt: TextView
+    private lateinit var evTxt: TextView
+    private lateinit var evBox: LinearLayout
     private lateinit var qualityPill: TextView
     private lateinit var stabPill: TextView
     private lateinit var noiseBtn: ImageButton
@@ -52,6 +53,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private var rangeKey = ""
     private var landscape = false
     private var listSig = ""
+    private var builtAspect = ""
     private val camCb: () -> Unit = { syncZoom(); refresh() }
     /** Obrót o 180° (poziomo w lewo ↔ w prawo) nie zmienia konfiguracji ekranu – wykrywamy go tutaj, żeby film nie był do góry nogami. */
     private val displayListener = object : android.hardware.display.DisplayManager.DisplayListener {
@@ -80,6 +82,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
     override fun onStart() {
         super.onStart()
+        if (builtAspect != Prefs.aspect) { buildUi(); rangeKey = "" }   // zmiana proporcji w ustawieniach – nowy układ
         Engine.addUi(this)
         CamRec.setSurface(preview.surfaceProvider)
         CamRec.setRotation(rot())
@@ -141,19 +144,37 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildUi() {
-        listSig = ""
+        listSig = ""; builtAspect = Prefs.aspect
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         if (!::preview.isInitialized) preview = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE   // płynny obrót bez czarnej klatki
         } else (preview.parent as? ViewGroup)?.removeView(preview)
-        root.addView(preview, FrameLayout.LayoutParams(-1, -1))
+
+        // Obraz ma proporcje 4:3 (lub 16:9), ekran jest dużo dłuższy – elementy sterujące układamy
+        // w wolnych pasach obok obrazu, żeby niczego nie zasłaniały.
+        val dm = resources.displayMetrics
+        val sw = dm.widthPixels; val sh = dm.heightPixels
+        val ratio = if (Prefs.aspect == "16:9") 16f / 9f else 4f / 3f
+        val band: Int   // pas na górze (pionowo) albo po lewej (poziomo)
+        if (!landscape) {
+            val imgH = (sw * ratio).toInt()
+            val avail = sh - imgH
+            band = dp(112) + maxOf(0, avail - dp(204) - dp(112)) / 2
+            root.addView(preview, FrameLayout.LayoutParams(sw, minOf(imgH, sh - band)).apply { topMargin = band })
+        } else {
+            val imgW = (sh * ratio).toInt()
+            val avail = sw - imgW
+            band = dp(108) + maxOf(0, avail - dp(214) - dp(108)) / 2
+            root.addView(preview, FrameLayout.LayoutParams(minOf(imgW, sw - band), sh).apply { leftMargin = band })
+        }
         val scale = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(det: ScaleGestureDetector): Boolean { applyZoom(dial.zoom * det.scaleFactor); return true }
         })
         preview.setOnTouchListener { _, e -> scale.onTouchEvent(e); true }
 
-        // ---- górny pasek ----
+        // ---- elementy pasa górnego / lewego ----
+        val settingsBtn = iconBtn(R.drawable.ic_settings, 38) { openSettings() }
         qualityPill = pillText("FHD").apply { setOnClickListener { qualityMenu(it) } }
         stabPill = pillText("STAB").apply {
             setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_stab, 0, 0, 0); compoundDrawablePadding = dp(6)
@@ -162,38 +183,70 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         noiseBtn = iconBtn(R.drawable.ic_noise, 38) { toggleNoise() }
         statusPill = pillText("").apply {
             setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_group, 0, 0, 0); compoundDrawablePadding = dp(6)
-            setOnClickListener { roomsDialog() }
+            setOnClickListener { roomPanel() }
         }
-        val top = LinearLayout(this).apply {
+        // korekta ekspozycji: − ciemniej, + jaśniej, dotknięcie wartości zeruje
+        evTxt = text("EV 0", 12f, bold = true).apply { gravity = Gravity.CENTER; setPadding(dp(2), dp(7), dp(2), dp(7)); setOnClickListener { CamRec.nudgeEv(0) } }
+        fun evBtn(s: String, dir: Int) = text(s, 18f, bold = true).apply {
+            gravity = Gravity.CENTER; setPadding(dp(10), dp(3), dp(10), dp(3)); setOnClickListener { CamRec.nudgeEv(dir) }
+        }
+        evBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(if (landscape) 10 else 30), dp(if (landscape) 224 else 10), dp(10))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#AA000000"), Color.TRANSPARENT))
-            addView(iconBtn(R.drawable.ic_settings, 38) { openSettings() })
-            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(qualityPill); addView(gap(8)); addView(stabPill); addView(gap(8)); addView(noiseBtn)
-            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(statusPill)
+            background = roundBg(glass, dp(16).toFloat())
+            addView(evBtn("−", -1)); addView(evTxt, LinearLayout.LayoutParams(dp(46), -2)); addView(evBtn("+", 1))
         }
-        root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        val topH = if (landscape) 62 else 84
+        recInfo = text("", 13f, bold = true).apply {
+            background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(8), dp(4), dp(8), dp(4)); visibility = View.GONE; maxLines = 1
+        }
+        athList = LinearLayout(this).apply { orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
 
-        recInfo = text("", 15f, bold = true).apply {
-            background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(12), dp(4), dp(12), dp(4)); visibility = View.GONE
+        if (!landscape) {
+            val row1 = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(settingsBtn)
+                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(qualityPill); addView(gap(6)); addView(stabPill); addView(gap(6)); addView(noiseBtn)
+                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(statusPill)
+            }
+            val row2 = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(evBox)
+                addView(android.widget.HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; addView(athList) },
+                    LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6); marginEnd = dp(6) })
+                addView(recInfo)
+            }
+            val top = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM
+                setPadding(dp(8), dp(28), dp(8), dp(4))
+                addView(row1, lp()); addView(row2, lp(top = dp(4)))
+            }
+            root.addView(top, FrameLayout.LayoutParams(-1, band, Gravity.TOP))
+        } else {
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(6), dp(8), dp(4), dp(8))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+                    addView(settingsBtn); addView(gap(8)); addView(noiseBtn)
+                })
+                addView(qualityPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(stabPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(evBox, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(statusPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(recInfo, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(athList, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+            }
+            root.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(col, FrameLayout.LayoutParams(-1, -2)) },
+                FrameLayout.LayoutParams(band, -1, Gravity.START))
         }
-        root.addView(recInfo, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(topH) })
-        muteBanner = text("WYCISZONO WSZYSTKO – dotknij, aby przywrócić", 14f, bold = true).apply {
+
+        // komunikat o wyciszeniu wszystkiego / rozmowie z jedną osobą – jedyny element nad obrazem, tylko w tych stanach
+        muteBanner = text("", 14f, bold = true).apply {
             background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(14), dp(8), dp(14), dp(8)); visibility = View.GONE
-            setOnClickListener { Engine.toggleFullMute() }
+            setOnClickListener { if (Engine.fullMute) Engine.toggleFullMute() else Engine.setSolo(null) }
         }
-        root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(topH + 34) })
-        dataTxt = text("", 11f, Color.parseColor("#CCFFFFFF")).apply { setShadowLayer(4f, 0f, 1f, Color.BLACK) }
-        root.addView(dataTxt, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = dp(topH - 4); rightMargin = dp(if (landscape) 224 else 14) })
-
-        athList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(athList) },
-            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                topMargin = dp(topH); leftMargin = dp(10); bottomMargin = dp(if (landscape) 16 else 260)
-            })
+        root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = (if (landscape) 0 else band) + dp(10) })
 
         // ---- zoom i przyciski ----
         presets = LinearLayout(this).apply { orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -219,39 +272,35 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 addView(cell(gallery), LinearLayout.LayoutParams(0, -2, 1f))
                 addView(cell(micBtn), LinearLayout.LayoutParams(0, -2, 1f))
-                addView(shutter, LinearLayout.LayoutParams(dp(80), dp(80)))
+                addView(shutter, LinearLayout.LayoutParams(dp(76), dp(76)))
                 addView(cell(spkBtn), LinearLayout.LayoutParams(0, -2, 1f))
                 addView(cell(invite), LinearLayout.LayoutParams(0, -2, 1f))
             }
             val bottom = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(8), dp(24), dp(8), dp(22))
-                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
-                addView(presets, lp())
-                addView(dial, lp(h = dp(78), top = dp(4)))
-                addView(ctrls, lp(top = dp(6)))
+                setPadding(dp(8), dp(4), dp(8), dp(16))
+                addView(presets, lp(h = dp(36)))
+                addView(dial, lp(h = dp(64), top = dp(2)))
+                addView(ctrls, lp(top = dp(4)))
             }
             root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         } else {
-            // poziomo: przyciski w kolumnie po prawej (jak w aparacie), zoom w wąskim pasku na dole
+            // poziomo: przyciski w kolumnie po prawej (jak w aparacie), zoom tuż obok spustu
             val side = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(8), dp(10), dp(8), dp(10))
-                background = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
+                setPadding(dp(6), dp(10), dp(6), dp(10))
                 fun sp() = View(context).apply { layoutParams = LinearLayout.LayoutParams(1, 0, 1f) }
                 addView(invite); addView(sp()); addView(spkBtn); addView(sp())
                 addView(shutter, LinearLayout.LayoutParams(dp(76), dp(76))); addView(sp())
                 addView(micBtn); addView(sp()); addView(gallery)
             }
-            root.addView(side, FrameLayout.LayoutParams(dp(100), -1, Gravity.END))
-            // zoom tuż obok spustu: przyciski skoku + pionowe pokrętło
+            root.addView(side, FrameLayout.LayoutParams(dp(96), -1, Gravity.END))
             val zoomCol = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                background = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, intArrayOf(Color.parseColor("#99000000"), Color.TRANSPARENT))
                 addView(presets, LinearLayout.LayoutParams(dp(44), -2))
                 addView(dial, LinearLayout.LayoutParams(dp(70), -1))
             }
-            root.addView(zoomCol, FrameLayout.LayoutParams(dp(120), -1, Gravity.END).apply { rightMargin = dp(100); topMargin = dp(56); bottomMargin = dp(8) })
+            root.addView(zoomCol, FrameLayout.LayoutParams(dp(118), -1, Gravity.END).apply { rightMargin = dp(96); topMargin = dp(8); bottomMargin = dp(8) })
         }
         setContentView(root)
     }
@@ -347,7 +396,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         val r = CamRec.recording != null
         recInfo.visibility = if (r || CamRec.muxing) View.VISIBLE else View.GONE
         if (r) { val s = (System.currentTimeMillis() - CamRec.recStartedAt) / 1000; recInfo.text = String.format(Locale.US, "●  %02d:%02d", s / 60, s % 60) }
-        else if (CamRec.muxing) recInfo.text = "Zapisuję nagranie…"
+        else if (CamRec.muxing) recInfo.text = "Zapis…"
     }
 
     override fun onEngineChanged() {
@@ -358,9 +407,11 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private fun refresh() {
         val r = Prefs.currentRoom()
         val all = Engine.athletesView; val on = all.count { it.status == "online" }
-        statusPill.text = "$on" + (if (all.size > on) "/${all.size}" else "") + "  ·  ${r.name}"
+        statusPill.text = "$on" + (if (all.size > on) "/${all.size}" else "") + (if (landscape) "" else "  ·  ${r.name.take(10)}")
         statusPill.setTextColor(if (Engine.signalOpen) Color.WHITE else ACCENT)
-        dataTxt.text = "${r.code} · ${fmtBytes(Engine.bytesSent + Engine.bytesRecv)}" + if (!Engine.signalOpen) " · łączenie…" else ""
+        evTxt.text = CamRec.evLabel()
+        evTxt.setTextColor(if (Prefs.evIndex != 0) ACCENT else Color.WHITE)
+        evBox.visibility = if (CamRec.camera == null || CamRec.evSupported()) View.VISIBLE else View.GONE
         qualityPill.text = when (Prefs.quality) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
         val sm = Prefs.stabMode
         stabPill.text = when (sm) { "sport" -> "SPORT"; "std" -> "STAB"; else -> "OFF" }
@@ -376,45 +427,38 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             ptt -> { micBtn.state(Engine.pttActive); if (!Engine.pttActive) micBtn.alpha = 1f }
             else -> { micBtn.state(true, warn = !Engine.micOn); if (Engine.micOn) micBtn.imageTintList = ColorStateList.valueOf(Color.WHITE) }
         }
-        muteBanner.visibility = if (Engine.fullMute) View.VISIBLE else View.GONE
+        val soloName = Engine.soloCid?.let { id -> all.firstOrNull { it.cid == id }?.name }
+        muteBanner.visibility = if (Engine.fullMute || soloName != null) View.VISIBLE else View.GONE
+        muteBanner.text = if (Engine.fullMute) "WYCISZONO WSZYSTKO – dotknij, aby przywrócić" else "Mówisz tylko do: $soloName – dotknij, aby mówić do wszystkich"
         spkBtn.setImageResource(if (Engine.fullMute) R.drawable.ic_volume_off else if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
         shutter.recording = CamRec.recording != null
         updateRecTime()
         // zawodnicy – każdy z osobnym wyciszeniem. Listę przebudowujemy tylko, gdy coś się w niej zmieniło:
         // odświeżanie co 2 s (licznik danych) podmieniałoby przyciski pod palcem i gubiło dotknięcia.
-        val sig = r.code + "#" + all.joinToString("|") { "${it.cid}:${it.name}:${it.status}:${it.muted}" }
+        val sig = r.code + "#" + Engine.soloCid + "#" + all.joinToString("|") { "${it.cid}:${it.name}:${it.status}:${it.muted}:${it.sendOn}" }
         if (sig == listSig) return
         listSig = sig
         athList.removeAllViews()
-        val onlineIds = all.filter { it.status == "online" }.map { it.cid }.toSet()
-        if (Prefs.history(r.code).any { it.cid !in onlineIds }) {
-            val call = pillText("Zadzwoń").apply {
-                setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_call, 0, 0, 0); compoundDrawablePadding = dp(6)
-                setOnClickListener { callDialog() }
-            }
-            athList.addView(call, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(8) })
-        }
         for (a in all) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                background = roundBg(glass, dp(20).toFloat()); setPadding(dp(12), dp(2), dp(2), dp(2))
-                alpha = if (a.status == "offline") 0.6f else 1f
-            }
+            val solo = Engine.soloCid == a.cid
             val dotColor = when (a.status) { "online" -> 0xFF30D158.toInt(); "offline" -> 0xFFFF453A.toInt(); else -> ACCENT }
-            row.addView(View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(dotColor) } },
-                LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(8) })
-            row.addView(text(a.name + if (a.status == "offline") " · ponawianie" else "", 14f, bold = true))
-            val mute = ImageButton(this).apply {
-                setImageResource(if (a.muted) R.drawable.ic_volume_off else R.drawable.ic_volume_up)
-                imageTintList = ColorStateList.valueOf(if (a.muted) 0xFFFF453A.toInt() else Color.WHITE)
-                background = null; setPadding(dp(8), dp(6), dp(8), dp(6))
-                contentDescription = if (a.muted) "Włącz dźwięk ${a.name}" else "Wycisz ${a.name}"
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                background = roundBg(if (solo) 0x66FFD60A else glass, dp(16).toFloat()); setPadding(dp(9), dp(5), dp(7), dp(5))
+                alpha = if (a.status == "offline") 0.6f else 1f
+                contentDescription = "${a.name}: dotknij, aby wyciszyć; przytrzymaj, aby mówić tylko do tej osoby"
                 setOnClickListener { Engine.toggleAthleteMute(a.cid) }
+                setOnLongClickListener { Engine.setSolo(if (solo) null else a.cid); true }
             }
-            row.addView(mute)
-            athList.addView(row, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
+            chip.addView(View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(dotColor) } },
+                LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(6) })
+            chip.addView(text(a.name, 13f, bold = true).apply { maxLines = 1 })
+            if (a.muted || !a.sendOn) chip.addView(ImageView(this).apply {
+                setImageResource(if (a.muted) R.drawable.ic_volume_off else R.drawable.ic_mic_off)
+                imageTintList = ColorStateList.valueOf(0xFFFF453A.toInt())
+            }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginStart = dp(4) })
+            athList.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { if (landscape) bottomMargin = dp(5) else marginEnd = dp(5) })
         }
-        updateRecTime()
     }
 
     private fun toggleRec() {
@@ -448,6 +492,105 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             addView(row(mic, { Vol.micDown() }, { Vol.micUp() }) { Vol.micLabel() }, lp(top = dp(4)))
         }
         MaterialAlertDialogBuilder(this).setTitle("Głośność").setView(box).setPositiveButton("OK", null).show()
+    }
+
+    // ---------------- panel zarządzania pokojem ----------------
+    private fun roomPanel() {
+        val r = Prefs.currentRoom()
+        val head = text("", 13f, col(R.color.mut))
+        val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val box = column(16).apply {
+            gravity = Gravity.START
+            addView(head, lp())
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(button("Zadzwoń…") { callDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
+                addView(button("Pokoje…") { roomsDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
+            }, lp(top = dp(8)))
+            addView(listBox, lp(top = dp(8)))
+        }
+        class Row(val info: TextView, val send: ImageButton, val recv: ImageButton, val solo: TextView)
+        val rows = HashMap<String, Row>()
+        var builtFor = ""
+
+        fun toggleBtn(icon: Int, onClick: () -> Unit) = ImageButton(this).apply {
+            setImageResource(icon); background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(col(R.color.card)) }
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)); setOnClickListener { onClick() }
+        }
+        fun slider(value: Float, onSet: (Float) -> Unit): View {
+            val pct = text("${Math.round(value * 100)}%", 12f, col(R.color.mut)).apply { minWidth = dp(44); gravity = Gravity.END }
+            val sb = android.widget.SeekBar(this).apply {
+                max = 20; progress = Math.round(value * 10)
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) { pct.text = "${p * 10}%"; if (fromUser) onSet(p / 10f) }
+                    override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
+                    override fun onStopTrackingTouch(s: android.widget.SeekBar) {}
+                })
+            }
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(sb, LinearLayout.LayoutParams(0, -2, 1f)); addView(pct)
+            }
+        }
+        fun build(all: List<Engine.AthleteView>) {
+            listBox.removeAllViews(); rows.clear()
+            if (all.isEmpty()) listBox.addView(text("Nikt nie jest połączony. Zaproś zawodników albo zadzwoń do osób, które już tu były.", 14f, col(R.color.mut)), lp(top = dp(8)))
+            for (a in all) {
+                val name = text(a.name, 16f, bold = true)
+                val info = text("", 12f, col(R.color.mut))
+                val send = toggleBtn(R.drawable.ic_mic) { Engine.setAthleteSend(a.cid, !(Engine.athletesView.firstOrNull { it.cid == a.cid }?.sendOn ?: true)) }
+                val recv = toggleBtn(R.drawable.ic_volume_up) { Engine.toggleAthleteMute(a.cid) }
+                val solo = text("Mów tylko do tej osoby", 13f, bold = true).apply {
+                    gravity = Gravity.CENTER; setPadding(dp(10), dp(8), dp(10), dp(8))
+                    setOnClickListener { Engine.setSolo(if (Engine.soloCid == a.cid) null else a.cid) }
+                }
+                fun line(btn: View, label: String, sl: View) = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    addView(btn); addView(text(label, 12f, col(R.color.mut)).apply { minWidth = dp(64); setPadding(dp(8), 0, 0, 0) })
+                    addView(sl, LinearLayout.LayoutParams(0, -2, 1f))
+                }
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL; background = roundBg(col(R.color.card2), dp(14).toFloat()); setPadding(dp(12), dp(10), dp(12), dp(10))
+                    addView(name); addView(info)
+                    addView(line(send, "Nadaję", slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }), lp(top = dp(6)))
+                    addView(line(recv, "Odbieram", slider(a.recvVol) { v -> Engine.setAthleteRecvVol(a.cid, v) }), lp(top = dp(4)))
+                    addView(solo, lp(top = dp(6)))
+                }
+                listBox.addView(card, lp(top = dp(8)))
+                rows[a.cid] = Row(info, send, recv, solo)
+            }
+        }
+        fun update() {
+            val all = Engine.athletesView
+            val on = all.count { it.status == "online" }
+            head.text = "Kod ${Prefs.currentRoom().code} · połączonych $on z ${all.size} · dane ${fmtBytes(Engine.bytesSent + Engine.bytesRecv)}" +
+                if (!Engine.signalOpen) " · łączenie z serwerem…" else ""
+            val key = all.joinToString("|") { it.cid + it.name }
+            if (key != builtFor) { builtFor = key; build(all) }
+            for (a in all) {
+                val row = rows[a.cid] ?: continue
+                val st = when (a.status) { "online" -> "połączony"; "offline" -> "brak połączenia – ponawianie"; else -> "łączenie…" }
+                val q = if (a.status == "online" && a.rttMs >= 0) " · opóźnienie ${a.rttMs} ms" + (if (a.lossPct >= 0) ", straty ${a.lossPct}%" else "") else ""
+                val bat = if (a.battery >= 0) " · bateria ${a.battery}%" else ""
+                row.info.text = st + q + bat + if (a.app) "" else " · strona"
+                row.info.setTextColor(if (a.status == "online" && (a.lossPct > 8 || a.rttMs > 600 || a.battery in 0..15)) ACCENT else col(R.color.mut))
+                row.send.setImageResource(if (a.sendOn) R.drawable.ic_mic else R.drawable.ic_mic_off)
+                row.send.imageTintList = ColorStateList.valueOf(if (a.sendOn) Color.WHITE else 0xFFFF453A.toInt())
+                row.recv.setImageResource(if (a.muted) R.drawable.ic_volume_off else R.drawable.ic_volume_up)
+                row.recv.imageTintList = ColorStateList.valueOf(if (a.muted) 0xFFFF453A.toInt() else Color.WHITE)
+                val solo = Engine.soloCid == a.cid
+                row.solo.text = if (solo) "Mówisz tylko do tej osoby – dotknij, aby wrócić do wszystkich" else "Mów tylko do tej osoby"
+                row.solo.background = roundBg(if (solo) ACCENT else col(R.color.card), dp(12).toFloat())
+                row.solo.setTextColor(if (solo) Color.BLACK else col(R.color.txt))
+            }
+        }
+        val ui = Engine.Ui { update() }
+        val dlg = MaterialAlertDialogBuilder(this).setTitle(r.name)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Zamknij", null).create()
+        dlg.setOnShowListener { Engine.addUi(ui) }
+        dlg.setOnDismissListener { Engine.removeUi(ui) }
+        dlg.show()
     }
 
     private fun ago(t: Long): String {

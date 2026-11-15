@@ -36,6 +36,7 @@ class SessionService : LifecycleService() {
             val wasRec = CamRec.recording != null
             CamRec.stopRec()
             Prefs.clearSession()
+            Prefs.lastSession = System.currentTimeMillis()
             Engine.stop()
             if (wasRec && running) try { app.startService(Intent(app, SessionService::class.java).setAction("SAVING")) } catch (_: Exception) {}
             // usługa zostaje przy życiu, dopóki nagranie nie zostanie zapisane w Galerii – system nie zabije aplikacji w połowie zapisu

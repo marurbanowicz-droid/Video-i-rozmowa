@@ -268,7 +268,7 @@
 <script>
 'use strict';
 /* ================= WERSJA I KONFIGURACJA ================= */
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 const CONFIG = {
   peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
@@ -1097,6 +1097,8 @@ function athConnectData() {
 function onCoachData(d) {
   if (!d || typeof d !== 'object') return;
   if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); for (const m of ath.mesh.values()) applyBitrate(m.call.peerConnection, ath.kbps); }
+  // głośność trenera ustawiona przez niego dla tego zawodnika (przeglądarka nie wzmacnia ponad 100%)
+  if (d.t === 'vol') { try { $('#athAudio').volume = Math.max(0, Math.min(1, +d.v || 0)); } catch {} }
   if (d.t === 'roster') {
     ath.roomName = d.room || ''; ath.cross = !!d.cross; $('#athRoomName').textContent = (ath.roomName || 'Pokój') + ' · ' + ath.code;
     const next = new Map(d.list.map(x => [x.id, x]));
@@ -1194,8 +1196,13 @@ function athCall() {
   c.on('close', () => { if (ath.call === c) { ath.call = null; setLink(false); } });
   c.on('error', () => { if (ath.call === c) ath.call = null; });
 }
+function athSendStatus() {
+  if (!ath.conn || !ath.conn.open || !navigator.getBattery) return;
+  navigator.getBattery().then(b => { try { ath.conn.send({ t: 'st', bat: Math.round(b.level * 100) }); } catch {} }).catch(() => {});
+}
 function athWatchdog(force) {
   if (!ath.active) return;
+  ath.tick = (ath.tick || 0) + 1; if (ath.tick % 20 === 1) athSendStatus();
   updateMesh();
   if (ath.ctx && ath.ctx.state !== 'running') ath.ctx.resume().catch(() => {});
   const p = ath.peer;

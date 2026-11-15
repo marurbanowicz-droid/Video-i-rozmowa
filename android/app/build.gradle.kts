@@ -65,6 +65,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-video:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+    implementation("androidx.camera:camera-effects:$camerax")
 
     implementation("io.getstream:stream-webrtc-android:1.1.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

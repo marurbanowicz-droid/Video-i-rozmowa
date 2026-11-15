@@ -53,6 +53,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         if (coach) {
             val img = cat("Obraz i nagrywanie")
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
+            img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
+            img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy. W trybie Sport niedostępny.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
                 arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – duże kadrowanie (motorówka)"), arrayOf("off", "std", "sport"), Prefs.stabMode)
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
@@ -109,7 +111,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "Działa dla zapisanych pokoi, gdy nie prowadzisz sesji. Dotknięcie powiadomienia rozpoczyna sesję.", true)
         sb.sw("standby_ath", "Pozwól trenerowi do mnie dzwonić",
             "Trener może wywołać Cię z listy osób, które były w jego pokoju (tylko aplikacja Android).", true)
-        sb.action("Zużycie baterii", "Czuwanie utrzymuje telefon w gotowości i stałe połączenie z serwerem, więc zużywa baterię także przy zgaszonym ekranie. Gdy nie jest potrzebne, użyj „Zamknij aplikację” albo wyłącz obie opcje.") {}
+        sb.action("Czas czuwania", "Czuwanie wyłącza się samo 2 godziny po zakończeniu ostatniej sesji, żeby nie zużywać baterii. Wcześniej możesz je zatrzymać przez „Zamknij aplikację”.") {}
 
         val appCat = cat("Aplikacja")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
@@ -171,7 +173,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "vol_up", "vol_down" -> Controls.applyVolumeMode()
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "sport_crop" -> {
+            "quality", "stab_mode", "sport_crop", "aspect", "watermark" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }

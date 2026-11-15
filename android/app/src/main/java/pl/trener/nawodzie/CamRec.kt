@@ -10,7 +10,12 @@ import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.AspectRatio
+import androidx.camera.core.CameraEffect
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.effects.OverlayEffect
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
@@ -58,6 +63,15 @@ object CamRec {
     private var pendingRebind = false
     private var lastZoomKey = ""
     private var sport: SportEffect? = null
+    private var overlay: OverlayEffect? = null
+    private val overlayThread by lazy { android.os.HandlerThread("watermark").apply { start() } }
+    private val stampFmt = java.text.SimpleDateFormat("yyyy-MM-dd  HH:mm:ss", java.util.Locale.US)
+    private var stampSec = 0L
+    private var stampText = ""
+    private val stampPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; typeface = android.graphics.Typeface.MONOSPACE
+        setShadowLayer(4f, 0f, 1f, android.graphics.Color.BLACK)
+    }
     private var appCtx: Context? = null
     /** Aktualny zoom (czytany przez tryb Sport z innego wątku). */
     @Volatile var curZoom = 1f; private set
@@ -78,6 +92,7 @@ object CamRec {
         try { recording?.stop() } catch (_: Exception) {}
         provider?.unbindAll()
         sport?.processor?.release(); sport = null
+        try { overlay?.close() } catch (_: Exception) {}; overlay = null
         camera = null; preview = null; videoCapture = null; owner = null
         notifyChange()
     }
@@ -90,6 +105,8 @@ object CamRec {
         try {
             p.unbindAll()
             sport?.processor?.release(); sport = null
+            try { overlay?.close() } catch (_: Exception) {}; overlay = null
+            val wide = Prefs.aspect == "16:9"
             val sel = CameraSelector.DEFAULT_BACK_CAMERA
             val info = try { p.getCameraInfo(sel) } catch (_: Exception) { null }
             val prevStabOk = info != null && Preview.getPreviewCapabilities(info).isStabilizationSupported
@@ -104,8 +121,11 @@ object CamRec {
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(q, FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)))
                 .setTargetVideoEncodingBitRate(br)
+                .setAspectRatio(if (wide) AspectRatio.RATIO_16_9 else AspectRatio.RATIO_4_3)
                 .build()
-            val pb = Preview.Builder().setTargetRotation(rotation)
+            // podgląd w tych samych proporcjach co nagranie – na ekranie widać dokładnie to, co trafi do filmu
+            val pb = Preview.Builder().setTargetRotation(rotation).setResolutionSelector(ResolutionSelector.Builder()
+                .setAspectRatioStrategy(if (wide) AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY else AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build())
             if (want && prevStabOk) pb.setPreviewStabilizationEnabled(true)
             val vb = VideoCapture.Builder(recorder).setTargetRotation(rotation)
             if (want && !prevStabOk && vidStabOk) vb.setVideoStabilizationEnabled(true)
@@ -134,7 +154,19 @@ object CamRec {
                     p.unbindAll()
                     p.bindToLifecycle(o, sel, pv, vc)
                 }
+            } else if (Prefs.watermark) {
+                try {
+                    val eff = makeWatermark()
+                    val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(eff).build()
+                    p.bindToLifecycle(o, sel, group).also { overlay = eff }
+                } catch (e: Exception) {
+                    Log.e(TAG, "watermark", e)
+                    try { overlay?.close() } catch (_: Exception) {}; overlay = null
+                    p.unbindAll()
+                    p.bindToLifecycle(o, sel, pv, vc)
+                }
             } else p.bindToLifecycle(o, sel, pv, vc)
+            applyEv()
             lastZoomKey = ""
             camera?.cameraInfo?.zoomState?.observe(o) { zs ->
                 curZoom = zs.zoomRatio
@@ -146,6 +178,60 @@ object CamRec {
             Log.e(TAG, "bind", e); Notifier.toast("Błąd kamery: ${e.message}")
         }
         notifyChange()
+    }
+
+    /** Data i godzina małą czcionką w prawym dolnym rogu obrazu (podgląd i nagranie). */
+    private fun makeWatermark(): OverlayEffect {
+        val eff = OverlayEffect(CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE, 0, android.os.Handler(overlayThread.looper)) { t -> Log.e(TAG, "overlay", t) }
+        eff.setOnDrawListener { frame ->
+            val c = frame.overlayCanvas
+            c.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            val w = frame.size.width.toFloat(); val h = frame.size.height.toFloat()
+            val rot = ((frame.rotationDegrees % 360) + 360) % 360
+            c.save()
+            when (rot) {   // rysujemy w układzie „jak widzi widz”, niezależnie od ułożenia matrycy
+                90 -> { c.translate(0f, h); c.rotate(-90f) }
+                180 -> { c.translate(w, h); c.rotate(180f) }
+                270 -> { c.translate(w, 0f); c.rotate(90f) }
+            }
+            val uw = if (rot % 180 == 0) w else h; val uh = if (rot % 180 == 0) h else w
+            val now = System.currentTimeMillis()
+            if (now / 1000 != stampSec) { stampSec = now / 1000; stampText = stampFmt.format(java.util.Date(now)) }
+            stampPaint.textSize = minOf(uw, uh) * 0.026f
+            val m = minOf(uw, uh) * 0.02f
+            c.drawText(stampText, uw - m - stampPaint.measureText(stampText), uh - m, stampPaint)
+            c.restore()
+            true
+        }
+        return eff
+    }
+
+    // ---------------- ekspozycja ----------------
+    /** Krok korekty ekspozycji ≈ 1/3 EV (w jednostkach aparatu). */
+    private fun evStep(): Int {
+        val st = camera?.cameraInfo?.exposureState ?: return 1
+        val s = st.exposureCompensationStep.toFloat()
+        return if (s > 0f) Math.round(0.33f / s).coerceAtLeast(1) else 1
+    }
+    fun evSupported(): Boolean = camera?.cameraInfo?.exposureState?.isExposureCompensationSupported == true
+    /** Stała korekta jasności (bez blokowania automatyki): dir = -1 ciemniej, +1 jaśniej, 0 = zerowanie. */
+    fun nudgeEv(dir: Int) {
+        val st = camera?.cameraInfo?.exposureState ?: return
+        val r = st.exposureCompensationRange
+        Prefs.evIndex = if (dir == 0) 0 else (Prefs.evIndex + dir * evStep()).coerceIn(r.lower, r.upper)
+        applyEv(); notifyChange()
+    }
+    private fun applyEv() {
+        val cam = camera ?: return
+        val st = cam.cameraInfo.exposureState
+        if (!st.isExposureCompensationSupported) return
+        val r = st.exposureCompensationRange
+        try { cam.cameraControl.setExposureCompensationIndex(Prefs.evIndex.coerceIn(r.lower, r.upper)) } catch (_: Exception) {}
+    }
+    fun evLabel(): String {
+        val s = camera?.cameraInfo?.exposureState?.exposureCompensationStep?.toFloat() ?: 0f
+        val v = Prefs.evIndex * s
+        return if (Prefs.evIndex == 0) "EV 0" else String.format(java.util.Locale.US, "EV %+.1f", v)
     }
 
     fun setSurface(sp: Preview.SurfaceProvider?) = onMain { surfaceProvider = sp; preview?.setSurfaceProvider(sp) }
