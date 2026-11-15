@@ -169,7 +169,7 @@ class MainActivity : AppCompatActivity() {
             StandbyService.stop(this)
             Prefs.saveSession("coach")
             Engine.startCoach()
-            SessionService.start(this, granted(Manifest.permission.CAMERA))
+            SessionService.start(this, coach = true, camera = granted(Manifest.permission.CAMERA))
             startActivity(Intent(this, CoachActivity::class.java))
         }
         perms.launch((basePerms() + Manifest.permission.CAMERA).toTypedArray())
@@ -181,7 +181,7 @@ class MainActivity : AppCompatActivity() {
             StandbyService.stop(this)
             Prefs.saveSession("athlete", code, name)
             Engine.startAthlete(code, name)
-            SessionService.start(this, false)
+            SessionService.start(this, coach = false, camera = false)
             startActivity(Intent(this, AthleteActivity::class.java))
         }
         perms.launch(basePerms().toTypedArray())

@@ -71,7 +71,8 @@ class ZoomDial(ctx: Context) : View(ctx) {
             MotionEvent.ACTION_MOVE -> {
                 val pos = if (vertical) e.y else e.x
                 val dx = pos - lastX; lastX = pos
-                val nz = exp(ln(zoom) - dx / pxPerLog).coerceIn(minZ, maxZ)
+                // pionowo: przesunięcie palca w dół przybliża; poziomo: w lewo przybliża
+                val nz = exp(ln(zoom) + (if (vertical) dx else -dx) / pxPerLog).coerceIn(minZ, maxZ)
                 if (nz != zoom) {
                     zoom = nz
                     val near = ticks.firstOrNull { it.second && abs(it.first - nz) < 0.03f * it.first }?.first ?: -1f
@@ -131,11 +132,11 @@ class ZoomDial(ctx: Context) : View(ctx) {
             val len = if (major) 13f * d else 7f * d
             val p = if (major) majorP else tickP
             p.alpha = (255 * a).toInt()
-            c.drawLine(cx + r * co, cy + r * s, cx + (r - len) * co, cy + (r - len) * s, p)
+            c.drawLine(cx + r * co, cy - r * s, cx + (r - len) * co, cy - (r - len) * s, p)
             if (major) {
                 labelP.alpha = (255 * a).toInt()
                 val lr = r - 30f * d
-                c.drawText(fmt(v), cx + lr * co, cy + lr * s + 4f * d, labelP)
+                c.drawText(fmt(v), cx + lr * co, cy - lr * s + 4f * d, labelP)
             }
         }
         tri.reset(); tri.moveTo(apex + 10 * d, cy - 6 * d); tri.lineTo(apex + 10 * d, cy + 6 * d); tri.lineTo(apex + 3 * d, cy); tri.close()

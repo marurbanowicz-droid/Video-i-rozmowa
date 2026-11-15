@@ -89,7 +89,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
     override fun onStop() { Engine.removeUi(this); super.onStop() }
 
     override fun onEngineChanged() {
-        if (Engine.role == Engine.Role.NONE) { finish(); return }
+        if (!Engine.active) { finish(); return }
         refresh()
     }
 

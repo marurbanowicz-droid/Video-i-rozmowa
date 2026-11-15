@@ -53,6 +53,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         if (coach) {
             val img = cat("Obraz i nagrywanie")
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
+            img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
+            img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy. W trybie Sport niedostępny.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
                 arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – duże kadrowanie (motorówka)"), arrayOf("off", "std", "sport"), Prefs.stabMode)
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
@@ -81,7 +83,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             arrayOf("0.5", "0.75", "1", "1.5", "2", "3", "4"), "1")
         snd.list("gain", "Głośność odbieranego głosu (wzmocnienie)", arrayOf("1× (bez wzmocnienia)", "2×", "3× (zalecane)", "4×", "6×", "8× (może przesterowywać)"), arrayOf("1", "2", "3", "4", "6", "8"), "3")
         if (coach) {
-            snd.sw("coach_noise", "Redukcja szumów", "Działa też na nagraniu – może przytłumić sygnał startu.", false)
+            snd.sw("coach_noise", "Redukcja szumów w rozmowie", "Dotyczy tego, co słyszą zawodnicy. Nagranie wideo dostaje dźwięk bez redukcji.", false)
             snd.sw("coach_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru i silnika.", true)
             snd.sw("crosstalk", "Zawodnicy słyszą się nawzajem", "Każdy zawodnik łączy się z każdym – działa też z zawodnikami na stronie (iPhone).", true)
         } else {
@@ -109,7 +111,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "Działa dla zapisanych pokoi, gdy nie prowadzisz sesji. Dotknięcie powiadomienia rozpoczyna sesję.", true)
         sb.sw("standby_ath", "Pozwól trenerowi do mnie dzwonić",
             "Trener może wywołać Cię z listy osób, które były w jego pokoju (tylko aplikacja Android).", true)
-        sb.action("Zużycie baterii", "Czuwanie utrzymuje połączenie z serwerem – podobnie jak komunikatory, kilka % baterii na dobę. Wyłącz obie opcje, aby zatrzymać czuwanie.") {}
+        sb.action("Czas czuwania", "Czuwanie wyłącza się samo 2 godziny po zakończeniu ostatniej sesji, żeby nie zużywać baterii. Wcześniej możesz je zatrzymać przez „Zamknij aplikację”.") {}
 
         val appCat = cat("Aplikacja")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
@@ -171,7 +173,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "vol_up", "vol_down" -> Controls.applyVolumeMode()
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "sport_crop" -> {
+            "quality", "stab_mode", "sport_crop", "aspect", "watermark" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }

@@ -27,6 +27,12 @@ object Prefs {
 
     // ---------- ustawienia ----------
     val cid: String get() = sp.getString("cid", "") ?: ""
+    /** Stały token tej instalacji dla serwera sygnalizacyjnego – pozwala wrócić pod własny identyfikator po zerwaniu sieci. */
+    val sigToken: String get() = sp.getString("sig_token", null) ?: genCode(16).lowercase().also { sp.edit().putString("sig_token", it).apply() }
+    /** Ostatnio ustawiona głośność rozmowy (-1 = jeszcze nie ustawiano). */
+    var voiceVol: Int
+        get() = sp.getInt("voice_vol", -1)
+        set(v) = sp.edit().putInt("voice_vol", v).apply()
     var athName: String
         get() = sp.getString("ath_name", "") ?: ""
         set(v) = sp.edit().putString("ath_name", v).apply()
@@ -66,7 +72,26 @@ object Prefs {
         get() = sp.getBoolean("speaker", false)
         set(v) = sp.edit().putBoolean("speaker", v).apply()
 
+    // ---------- kamera ----------
+    val aspect: String get() = sp.getString("aspect", "4:3") ?: "4:3"
+    val watermark get() = sp.getBoolean("watermark", true)
+    var evIndex: Int
+        get() = sp.getInt("ev_index", 0)
+        set(v) = sp.edit().putInt("ev_index", v).apply()
+
+    // ---------- głośności ustawione dla konkretnego zawodnika (1.0 = bez zmian) ----------
+    fun athRecvVol(cid: String) = sp.getFloat("rv_$cid", 1f)
+    fun athSendVol(cid: String) = sp.getFloat("sv_$cid", 1f)
+    fun setAthRecvVol(cid: String, v: Float) = sp.edit().putFloat("rv_$cid", v).apply()
+    fun setAthSendVol(cid: String, v: Float) = sp.edit().putFloat("sv_$cid", v).apply()
+
     // ---------- czuwanie w tle ----------
+    const val STANDBY_MS = 2 * 3600_000L
+    /** Koniec (lub początek) ostatniej sesji – czuwanie działa przez 2 godziny od tej chwili. */
+    var lastSession: Long
+        get() = sp.getLong("last_session", 0L)
+        set(v) = sp.edit().putLong("last_session", v).apply()
+    val standbyUntil: Long get() = lastSession + STANDBY_MS
     val standbyCoach get() = sp.getBoolean("standby_coach", true)
     val standbyAth get() = sp.getBoolean("standby_ath", true)
     /** Ustawiane przez „Zamknij aplikację” – czuwanie nie startuje, dopóki użytkownik nie otworzy aplikacji. */
@@ -96,6 +121,11 @@ object Prefs {
         val a = JSONArray(); list.take(30).forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
         sp.edit().putString("hist_$code", a.toString()).apply()
     }
+    fun moveHistory(from: String, to: String) {
+        val raw = sp.getString("hist_$from", null) ?: return
+        sp.edit().putString("hist_$to", raw).remove("hist_$from").apply()
+    }
+    fun dropHistory(code: String) = sp.edit().remove("hist_$code").apply()
     fun removeHistory(code: String, cid: String) {
         val a = JSONArray(); history(code).filter { it.cid != cid }.forEach { a.put(JSONObject().put("cid", it.cid).put("name", it.name).put("last", it.last).put("app", it.app)) }
         sp.edit().putString("hist_$code", a.toString()).apply()
