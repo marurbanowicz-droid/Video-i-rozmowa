@@ -37,43 +37,45 @@ SDP = {"type": "offer", "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\
 
 async def main():
     try:
-        A = await Conn("A", "tnw-probe-" + rid(), rid(12)).open()
         B = await Conn("B", "tnw-probe-" + rid(), rid(12)).open()
+        S = [await Conn(f"S{k}", "tnw-probe-" + rid(), rid(12)).open() for k in range(6)]
         await asyncio.sleep(1.5)
-        # T1: realistyczny OFFER (jak PeerJS)
-        await A.send("OFFER", B.id, {"sdp": SDP, "type": "media", "connectionId": "mc_" + rid(), "metadata": {"name": "x", "cid": "Y"}})
-        await asyncio.sleep(2.5)
-        # T2: OFFER typu "ring" bez sdp (tak dzwoni aplikacja)
-        await A.send("OFFER", B.id, {"type": "ring", "connectionId": "ring_" + rid(), "room": "ABCD", "roomName": "Test", "turn": ""})
-        await asyncio.sleep(2.5)
-        # T3: ring-decline
-        await B.send("OFFER", A.id, {"type": "ring-decline", "connectionId": "ring_" + rid(), "name": "Ola", "cid": "Y"})
-        await asyncio.sleep(2.5)
-        # T4: do nieistniejącego id -> EXPIRE?
-        t = time.time()
+        # V1: typ "ring" + sdp
+        await S[0].send("OFFER", B.id, {"sdp": SDP, "type": "ring", "connectionId": "ring_" + rid(), "room": "ABCD"})
+        await asyncio.sleep(2)
+        # V2: typ "data" + sdp + metadata.ring
+        await S[1].send("OFFER", B.id, {"sdp": SDP, "type": "data", "connectionId": "dc_" + rid(), "label": "x", "reliable": True,
+                                        "serialization": "json", "metadata": {"ring": {"room": "ABCD", "roomName": "Test", "turn": ""}}})
+        await asyncio.sleep(2)
+        # V3: typ "media" + sdp + metadata.ringDecline
+        await S[2].send("OFFER", B.id, {"sdp": SDP, "type": "media", "connectionId": "mc_" + rid(), "metadata": {"ringDecline": True, "name": "Ola", "cid": "Y"}})
+        await asyncio.sleep(2)
+        # V4: minimalne sdp
+        await S[3].send("OFFER", B.id, {"sdp": {"type": "offer", "sdp": "ring"}, "type": "data", "connectionId": "dc_" + rid(), "metadata": {"ring": 1}})
+        await asyncio.sleep(2)
+        # V5: typ "data", brak sdp
+        await S[4].send("OFFER", B.id, {"type": "data", "connectionId": "dc_" + rid(), "metadata": {"ring": 1}})
+        await asyncio.sleep(2)
+        for k in range(5): log(f"S{k} alive", S[k].closed is None)
+        A = S[5]
+        # T4: nieistniejący odbiorca -> EXPIRE
         await A.send("OFFER", "tnw-probe-none-" + rid(), {"sdp": SDP, "type": "media", "connectionId": "mc_" + rid()})
         await asyncio.sleep(8)
-        # T5: przejęcie identyfikatora tym samym tokenem i routing do nowego gniazda
+        # T5: przejęcie identyfikatora tym samym tokenem
         B2 = await Conn("B2", B.id, B.tok).open()
         await asyncio.sleep(2)
-        await A.send("OFFER", B.id, {"sdp": SDP, "type": "media", "connectionId": "mc_" + rid()})
+        await A.send("OFFER", B.id, {"sdp": SDP, "type": "media", "connectionId": "mc_take"})
         await asyncio.sleep(2.5)
-        # T6: gniazdo bez heartbeat – kiedy serwer je zamknie
-        N = await Conn("N", "tnw-probe-" + rid(), rid(12), hb=False).open()
-        # T7: wiadomość w kolejce: wysyłamy do id, które pojawi się za 3 s
+        # T7: wiadomość do id, które pojawi się za 3 s
         late = "tnw-probe-" + rid()
-        await A.send("OFFER", late, {"sdp": SDP, "type": "media", "connectionId": "mc_" + rid()})
+        await A.send("OFFER", late, {"sdp": SDP, "type": "media", "connectionId": "mc_late"})
         await asyncio.sleep(3)
         L = await Conn("L", late, rid(12)).open()
-        await asyncio.sleep(4)
-        for k in range(18):
-            if N.closed is not None: break
-            await asyncio.sleep(5)
-        log("N", f"closed={N.closed}")
+        await asyncio.sleep(5)
         log("A alive", A.closed is None)
     except Exception:
         log("EXC", traceback.format_exc()[-400:])
-    text = " | ".join(LOG)
+    text = " | ".join(x[:110] for x in LOG)
     for k in range(0, min(len(text), 8000), 800):
         print(f"::notice title=p{k//800:02d}::{text[k:k+800]}", flush=True)
 
