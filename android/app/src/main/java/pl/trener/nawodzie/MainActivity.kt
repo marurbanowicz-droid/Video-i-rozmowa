@@ -67,7 +67,7 @@ class MainActivity : AppCompatActivity() {
         val s = Prefs.session()
         resumeBtn.visibility = if (s != null) View.VISIBLE else View.GONE
         (resumeBtn as TextView).text = if (s?.optString("role") == "coach") "↻ Wznów sesję trenera (${Prefs.currentRoom().name})"
-                                       else if (s?.optBoolean("asCoach") == true) "↻ Wznów jako drugi trener (pokój ${s.optString("room")})"
+                                       else if (s?.optBoolean("asCoach") == true) "↻ Wznów jako trener (pokój ${s.optString("room")})"
                                        else "↻ Wznów połączenie (pokój ${s?.optString("room")})"
         if (s != null && Prefs.resumeAfterUpdate) { Prefs.resumeAfterUpdate = false; resume() }
     }
@@ -104,11 +104,12 @@ class MainActivity : AppCompatActivity() {
             addView(resumeBtn, lp(top = dp(24)))
             addView(button("Jestem trenerem") { askAndStartCoach() }, lp(top = dp(12)))
             addView(button("Jestem zawodnikiem") { asCoachBox.isChecked = false; showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
-            addView(button("Dołączam jako drugi trener") { asCoachBox.isChecked = true; showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
+            addView(button("Dołączam jako trener") { asCoachBox.isChecked = true; showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
             updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { showUpdateDialog(it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
             addView(button("Zamknij aplikację", "danger") { AppExit.confirm(this@MainActivity) }, lp(top = dp(24)))
+            addView(button("Sprawdź aktualizacje") { forceUpdateCheck() }, lp(top = dp(12)))
             verTxt = text("wersja ${BuildConfig.VERSION_NAME}", 12f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
             addView(verTxt, lp(top = dp(20)))
         }
@@ -124,7 +125,7 @@ class MainActivity : AppCompatActivity() {
             letterSpacing = 0.3f; setTextColor(col(R.color.txt)); setHintTextColor(col(R.color.mut)); textSize = 24f
         }
         asCoachBox = android.widget.CheckBox(this).apply {
-            text = "Dołączam jako drugi trener (kamera, nagrywanie, sterowanie zawodnikami)"; setTextColor(col(R.color.txt)); textSize = 15f
+            text = "Dołączam jako trener (kamera, nagrywanie, sterowanie zawodnikami)"; setTextColor(col(R.color.txt)); textSize = 15f
         }
         val j = column(0).apply {
             addView(text("Dołącz do treningu", 26f, bold = true).apply { gravity = Gravity.CENTER })
@@ -139,6 +140,21 @@ class MainActivity : AppCompatActivity() {
         join = j; j.visibility = View.GONE
         root.addView(h, lp()); root.addView(j, lp())
         setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
+    }
+
+    /** Wymuszone sprawdzenie – zawsze pokazuje wynik. */
+    private fun forceUpdateCheck() {
+        Notifier.toast("Sprawdzam aktualizacje…")
+        Updater.check { rel, err ->
+            when {
+                err != null -> com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                    .setTitle("Nie udało się sprawdzić").setMessage("Sprawdź połączenie z internetem.\n\n($err)").setPositiveButton("OK", null).show()
+                rel == null -> com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                    .setTitle("Masz najnowszą wersję").setMessage("Zainstalowana: ${BuildConfig.VERSION_NAME}\nNajnowsza opublikowana: ${Updater.latestSeen ?: "—"}\n\nJeśli nowa wersja jest scalona, a nie widać jej tutaj, poczekaj kilka minut – publikacja trwa po scaleniu.")
+                    .setPositiveButton("OK", null).show()
+                else -> { updBtn.text = "⬆ Zainstaluj aktualizację ${rel.version}"; updBtn.visibility = View.VISIBLE; showUpdateDialog(rel) }
+            }
+        }
     }
 
     private fun showHome() { home.visibility = View.VISIBLE; join.visibility = View.GONE }

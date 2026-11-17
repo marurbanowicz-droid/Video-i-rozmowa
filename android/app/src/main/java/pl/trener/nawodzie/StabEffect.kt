@@ -352,7 +352,8 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val legacy = mode == "sport"
     private val videoOnly = targets == CameraEffect.VIDEO_CAPTURE
     private val wantDelay = mode == "horizon2" && videoOnly
-    private val crop = Prefs.sportCrop.coerceIn(1.1f, 2.2f).toDouble()
+    private val levelOnly = mode == "level"
+    private val crop = if (levelOnly) 1.25 else Prefs.sportCrop.coerceIn(1.1f, 2.2f).toDouble()
     private val sensorRot = sensorRotation
     private val B = deviceToBuf(sensorRotation)
     private val BT = mT(B)
@@ -537,7 +538,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         }
 
         val A = if (Motion.at(tS, q, null)) qToM(q) else null
-        val V = if (A != null) step(A, dt, rot, corners) else null
+        val V = if (A != null) (if (levelOnly) levelV(A, dt, rot, corners) else step(A, dt, rot, corners)) else null
 
         if (wantDelay && !ringTried) allocRing()
         if (ringOk) {
@@ -674,6 +675,33 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
             pYaw = atan2(F[1], F[0]); pElev = asin(F[2].coerceIn(-1.0, 1.0))
         }
         return V
+    }
+
+    // ---- tryb Poziom: tylko powolny obrót kadru wokół osi obiektywu (drgania zostawiamy optycznej stabilizacji) ----
+    private var lvPhi = 0.0; private var lvInit = false
+
+    private fun rotAbout(a: DoubleArray, t: Double): DoubleArray {
+        val c = cos(t); val s = sin(t); val k = 1 - c; val x = a[0]; val y = a[1]; val z = a[2]
+        return doubleArrayOf(c + x * x * k, x * y * k - z * s, x * z * k + y * s,
+            y * x * k + z * s, c + y * y * k, y * z * k - x * s,
+            z * x * k - y * s, z * y * k + x * s, c + z * z * k)
+    }
+
+    private fun levelV(A: DoubleArray, dt: Double, rot: Int, corners: List<DoubleArray>): DoubleArray {
+        val F = mV(A, EF)
+        if (abs(F[2]) > 0.85) { lvInit = false; return A }   // aparat skierowany w górę / w dół – brak horyzontu
+        val er = rightAxis(rot)
+        val L = level(atan2(F[1], F[0]), asin(F[2].coerceIn(-1.0, 1.0)), er, upAxis(rot))
+        val ar = mV(A, er); val lr = mV(L, er)
+        val cx = doubleArrayOf(ar[1] * lr[2] - ar[2] * lr[1], ar[2] * lr[0] - ar[0] * lr[2], ar[0] * lr[1] - ar[1] * lr[0])
+        val phi = atan2(cx[0] * F[0] + cx[1] * F[1] + cx[2] * F[2], ar[0] * lr[0] + ar[1] * lr[1] + ar[2] * lr[2])
+        // wygładzenie ~0,5 s: horyzont prostuje się płynnie, bez szarpania od drgań łodzi
+        if (!lvInit) { lvPhi = phi; lvInit = true } else lvPhi += wrapPi(phi - lvPhi) * dt / (0.5 + dt)
+        val V = mMul(rotAbout(F, lvPhi), A)
+        if (fits(A, V, corners)) return V
+        var lo = 0.0; var hi = 1.0
+        repeat(10) { val m = (lo + hi) / 2; if (fits(A, mMul(rotAbout(F, lvPhi * m), A), corners)) lo = m else hi = m }
+        return mMul(rotAbout(F, lvPhi * lo), A)
     }
 
     /** Tor dla klatki opóźnionej: średnia toru z chwili klatki i następnych ~0,33 s („wyprzedzenie”). */

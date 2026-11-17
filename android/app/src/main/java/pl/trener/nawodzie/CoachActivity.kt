@@ -367,8 +367,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private fun stabMenu(anchor: View) {
         if (CamRec.recording != null) { Notifier.toast("Zatrzymaj nagrywanie, aby zmienić stabilizację"); return }
         val pm = PopupMenu(this, anchor)
-        val opts = listOf("off" to "Wyłączona", "std" to "Standardowa", "sport" to "Sport – wygładzanie drgań",
-            "horizon" to "Horyzont – poziom i wysokość", "horizon2" to "Horyzont płynny (nagranie +0,3 s)")
+        val opts = listOf("off" to "Optyczna (obiektyw)", "level" to "Optyczna + poziom horyzontu")
         opts.forEachIndexed { i, (_, label) -> pm.menu.add(0, i, i, label).isCheckable = true }
         pm.menu.setGroupCheckable(0, true, true)
         pm.menu.getItem(opts.indexOfFirst { it.first == Prefs.stabMode }.coerceAtLeast(0)).isChecked = true
@@ -377,14 +376,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             Prefs.sp.edit().putString("stab_mode", m).apply()
             CamRec.rebind()
             mainHandler.postDelayed({
-                Notifier.toast(when {
-                    m == "off" -> "Stabilizacja wyłączona"
-                    m == "sport" -> "Tryb Sport: obraz przycięty, mocna korekta wahań"
-                    m == "horizon" -> "Tryb Horyzont: poziom i wysokość horyzontu trzymane stale"
-                    m == "horizon2" -> "Tryb Horyzont płynny: nagranie z wyprzedzeniem 0,3 s"
-                    CamRec.stabSupported -> "Stabilizacja standardowa włączona"
-                    else -> "Ten telefon nie udostępnia standardowej stabilizacji – spróbuj trybu Sport"
-                }); refresh()
+                Notifier.toast(if (m == "level") "Optyczna stabilizacja + prostowanie horyzontu (kadr lekko przycięty)" else "Optyczna stabilizacja obiektywu"); refresh()
             }, 800)
             true
         }
@@ -432,8 +424,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         evBox.visibility = if (CamRec.camera == null || CamRec.evSupported()) View.VISIBLE else View.GONE
         qualityPill.text = when (Prefs.quality) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
         val sm = Prefs.stabMode
-        stabPill.text = when (sm) { "sport" -> "SPORT"; "std" -> "STAB"; "horizon" -> "HOR"; "horizon2" -> "HOR+"; else -> "OFF" }
-        val stabOn = sm == "sport" || sm == "horizon" || sm == "horizon2" || (sm == "std" && (CamRec.camera == null || CamRec.stabSupported))
+        stabPill.text = if (sm == "level") "OIS+POZ" else "OIS"
+        val stabOn = sm == "level"
         stabPill.setTextColor(if (stabOn) ACCENT else Color.WHITE)
         stabPill.compoundDrawablesRelative[0]?.mutate()?.setTint(if (stabOn) ACCENT else Color.WHITE)
         noiseBtn.state(Prefs.coachNoise)
@@ -520,6 +512,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         val box = column(16).apply {
             gravity = Gravity.START
             addView(head, lp())
+            addView(button("Kto kogo słyszy…") { hearDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, lp(top = dp(8)))
             if (isHost) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(button("Zadzwoń…") { callDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
@@ -570,10 +563,9 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL; background = roundBg(col(R.color.card2), dp(14).toFloat()); setPadding(dp(12), dp(10), dp(12), dp(10))
                     addView(name); addView(info)
-                    addView(line(send, "Nadaję", if (isHost) slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }
-                        else text("włącz / wyłącz mój głos u tej osoby", 12f, col(R.color.mut)).apply { setPadding(dp(8), 0, 0, 0) }), lp(top = dp(6)))
+                    addView(line(send, "Nadaję", slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }), lp(top = dp(6)))
                     addView(line(recv, "Odbieram", slider(a.recvVol) { v -> Engine.setAthleteRecvVol(a.cid, v) }), lp(top = dp(4)))
-                    if (isHost) addView(solo, lp(top = dp(6)))
+                    addView(solo, lp(top = dp(6)))
                     if (a.app) addView(text("⚙ Ustawienia zawodnika…", 13f, bold = true).apply {
                         gravity = Gravity.CENTER; setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundBg(col(R.color.card), dp(12).toFloat())
                         setOnClickListener { athleteSettings(a.cid) }
@@ -614,6 +606,35 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         dlg.setOnShowListener { Engine.addUi(ui) }
         dlg.setOnDismissListener { Engine.removeUi(ui) }
         dlg.show()
+    }
+
+    // ---------------- kto kogo słyszy ----------------
+    private class Person(val id: String, val label: String, val coach: Boolean)
+
+    private fun hearDialog() {
+        val ps = ArrayList<Person>()
+        ps.add(Person(Engine.HOST, if (isHost) "Ty" else "Trener główny", true))
+        if (!isHost) ps.add(Person(Prefs.cid, "Ty", true))
+        Engine.athletesView.forEach { ps.add(Person(it.cid, it.name, it.coach)) }
+        val cross = if (isHost) Prefs.crosstalk else Engine.athCross
+        val box = column(16).apply { gravity = Gravity.START }
+        box.addView(text("Włącz u każdej osoby tych, których ma słyszeć. Zmiana działa od razu.", 12f, col(R.color.mut)), lp())
+        if (!cross) box.addView(text("Zawodnicy nie słyszą się nawzajem (wyłączone w ustawieniach) – tych par tu nie ma.", 12f, col(R.color.mut)), lp(top = dp(4)))
+        for (l in ps) {
+            val rows = ps.filter { it.id != l.id && (cross || l.coach || it.coach) }
+            if (rows.isEmpty()) continue
+            box.addView(text("${l.label} słyszy:", 15f, bold = true), lp(top = dp(16)))
+            for (s in rows) {
+                val sw = androidx.appcompat.widget.SwitchCompat(this).apply {
+                    text = s.label; setTextColor(col(R.color.txt)); textSize = 14f
+                    isChecked = Engine.hears(l.id, s.id)
+                    setOnCheckedChangeListener { _, on -> Engine.setHears(l.id, s.id, on) }
+                }
+                box.addView(sw, lp(top = dp(4)))
+            }
+        }
+        MaterialAlertDialogBuilder(this).setTitle("Kto kogo słyszy").setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Zamknij", null).show()
     }
 
     // ---------------- zdalne ustawienia zawodnika ----------------

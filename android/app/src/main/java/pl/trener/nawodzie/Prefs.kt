@@ -47,7 +47,8 @@ object Prefs {
     val crosstalk get() = sp.getBoolean("crosstalk", true)
     val quality: String get() = sp.getString("quality", "FHD") ?: "FHD"
     /** off | std (systemowa) | sport (duże kadrowanie + żyroskop) */
-    val stabMode: String get() = sp.getString("stab_mode", null) ?: if (sp.getBoolean("stab", true)) "std" else "off"
+    /** off – tylko optyczna stabilizacja obiektywu (OIS); level – OIS + powolne poziomowanie horyzontu. Stare tryby → off. */
+    val stabMode: String get() = if (sp.getString("stab_mode", "off") == "level") "level" else "off"
     val sportCrop: Float get() = (sp.getString("sport_crop", "1.6") ?: "1.6").toFloatOrNull() ?: 1.6f
     val sportInvH get() = sp.getBoolean("sport_inv_h", false)
     val sportInvV get() = sp.getBoolean("sport_inv_v", false)
@@ -69,6 +70,8 @@ object Prefs {
     val webUrl: String get() = (sp.getString("web_url", BuildConfig.WEB_URL) ?: BuildConfig.WEB_URL).trim().ifEmpty { BuildConfig.WEB_URL }
     val audioOffsetMs: Long get() = (sp.getString("audio_offset", "0") ?: "0").trim().toLongOrNull() ?: 0L
     /** Notatki głosowe: transkrypcja i opcjonalny klucz OpenAI (Whisper). */
+    /** Nagranie z surowego mikrofonu (bez redukcji szumów i AGC systemu) – przy starcie sesji. */
+    val recRaw get() = sp.getBoolean("rec_raw", false)
     val noteTranscribe get() = sp.getBoolean("note_transcribe", true)
     val openaiKey: String get() = (sp.getString("openai_key", "") ?: "").trim()
     val nSound get() = sp.getBoolean("n_sound", true)
@@ -111,6 +114,10 @@ object Prefs {
         get() = sp.getBoolean("was_athlete", false)
         set(v) = sp.edit().putBoolean("was_athlete", v).apply()
     fun standbyId() = "tnw-a-" + cid.lowercase()
+
+    // ---------- kto kogo NIE słyszy (pary „słuchacz|mówiący”, osobno dla każdego pokoju) ----------
+    fun block(code: String): Set<String> = sp.getStringSet("block_$code", emptySet())?.toSet() ?: emptySet()
+    fun setBlock(code: String, v: Set<String>) = sp.edit().putStringSet("block_$code", v.toSet()).apply()
 
     // ---------- historia pokoju (kto już był) ----------
     data class Seen(val cid: String, val name: String, val last: Long, val app: Boolean)
