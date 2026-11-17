@@ -47,7 +47,8 @@ object Prefs {
     val crosstalk get() = sp.getBoolean("crosstalk", true)
     val quality: String get() = sp.getString("quality", "FHD") ?: "FHD"
     /** off | std (systemowa) | sport (duże kadrowanie + żyroskop) */
-    val stabMode: String get() = sp.getString("stab_mode", null) ?: if (sp.getBoolean("stab", true)) "std" else "off"
+    /** off – tylko optyczna stabilizacja obiektywu (OIS); level – OIS + powolne poziomowanie horyzontu. Stare tryby → off. */
+    val stabMode: String get() = if (sp.getString("stab_mode", "off") == "level") "level" else "off"
     val sportCrop: Float get() = (sp.getString("sport_crop", "1.6") ?: "1.6").toFloatOrNull() ?: 1.6f
     val sportInvH get() = sp.getBoolean("sport_inv_h", false)
     val sportInvV get() = sp.getBoolean("sport_inv_v", false)

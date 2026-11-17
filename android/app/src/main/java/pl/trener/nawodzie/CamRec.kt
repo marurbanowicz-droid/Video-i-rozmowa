@@ -82,7 +82,7 @@ object CamRec {
     @Volatile var curZoom = 1f; private set
     val sportActive get() = stabFx.isNotEmpty()
     private fun releaseStab() { stabFx.forEach { it.processor.release() }; stabFx = emptyList() }
-    private fun modeSuffix(m: String) = when (m) { "sport" -> "_SPORT"; "horizon" -> "_HOR"; "horizon2" -> "_HORP"; else -> "" }
+    private fun modeSuffix(m: String) = when (m) { "level" -> "_POZ"; else -> "" }
     /** Nazwy (bez rozszerzenia) plików roboczych, które są właśnie nagrywane lub zapisywane. */
     private val inUse: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
@@ -136,8 +136,9 @@ object CamRec {
             if (want && prevStabOk) pb.setPreviewStabilizationEnabled(true)
             val vb = VideoCapture.Builder(recorder).setTargetRotation(rotation)
             if (want && !prevStabOk && vidStabOk) vb.setVideoStabilizationEnabled(true)
-            val glMode = mode == "sport" || mode == "horizon" || mode == "horizon2"
-            if (glMode) {
+            val glMode = mode == "level" || mode == "sport" || mode == "horizon" || mode == "horizon2"
+            // tryb Poziom zostawia optyczną stabilizację obiektywu włączoną – to ona najlepiej tłumi drgania
+            if (glMode && mode != "level") {
                 // Tryby Sport/Horyzont same korygują ruch na podstawie żyroskopu. Optyczna stabilizacja obiektywu musi być wtedy
                 // wyłączona – inaczej drobne drgania byłyby korygowane dwa razy (raz przez obiektyw, raz przez aplikację).
                 try {

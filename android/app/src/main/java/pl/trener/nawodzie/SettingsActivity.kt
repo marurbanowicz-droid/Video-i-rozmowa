@@ -56,17 +56,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
             img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
-                arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – wygładzanie drgań", "Horyzont – poziom i wysokość horyzontu", "Horyzont płynny – z wyprzedzeniem (nagranie +0,3 s)"),
-                arrayOf("off", "std", "sport", "horizon", "horizon2"), Prefs.stabMode)
+                arrayOf("Optyczna (obiektyw)", "Optyczna + poziom horyzontu"), arrayOf("off", "level"), Prefs.stabMode)
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
-            img.edit("stab_offset", "Sport/Horyzont: korekta czasu żyroskopu (ms)", "10", numeric = true).apply {
-                summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "10"} ms – zmieniaj po 10 ms, jeśli korekta wyraźnie spóźnia się (więcej) albo wyprzedza ruch (mniej)." }
-            }
-            img.sw("stab_invert", "Horyzont: odwróć kierunek korekty", "Tylko jeśli obraz w trybie Horyzont wyraźnie wzmacnia kołysanie zamiast je tłumić.", false)
-            img.list("sport_crop", "Sport/Horyzont: siła kadrowania", arrayOf("Średnia (kadr 70%)", "Duża (kadr 62%)", "Bardzo duża (kadr 55%)"), arrayOf("1.4", "1.6", "1.8"), "1.6")
-            img.sw("sport_inv_h", "Tryb Sport: odwróć korektę w poziomie", "Włącz, jeśli obraz „ucieka” w złą stronę przy obrocie w bok.", false)
-            img.sw("sport_inv_v", "Tryb Sport: odwróć korektę w pionie", "Włącz, jeśli obraz „ucieka” w złą stronę przy kiwaniu w górę/dół.", false)
-            img.sw("sport_inv_roll", "Tryb Sport: odwróć korektę przechyłu", null, false)
+            img.sw("stab_invert", "Poziom horyzontu: odwróć kierunek korekty", "Tylko jeśli przechył na nagraniu jest dwa razy większy zamiast zniknąć.", false)
             img.edit("audio_offset", "Korekta synchronizacji dźwięku (ms)", "0", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – dodatnia: dźwięk później, ujemna: wcześniej. Sprawdź klaśnięciem w kadrze." }
             }
@@ -165,13 +157,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val mins = if (Engine.sessionStart > 0) maxOf(1.0, (System.currentTimeMillis() - Engine.sessionStart) / 60000.0) else 1.0
         dataPref?.summary = if (Engine.role == Engine.Role.NONE) "Brak aktywnej sesji"
             else "Wysłane ${fmtBytes(Engine.bytesSent)} · odebrane ${fmtBytes(Engine.bytesRecv)} · razem ${fmtBytes(tot)} (${fmtBytes((tot / mins).toLong())}/min)"
-        stabPref?.summary = when (Prefs.stabMode) {
-            "sport" -> "Sport: aplikacja kadruje obraz i wygładza drgania żyroskopem."
-            "horizon" -> "Horyzont: przechył wyrównany do poziomu, horyzont na stałej wysokości, wygładzone panoramowanie."
-            "horizon2" -> "Horyzont płynny: jak Horyzont, ale nagranie liczone z wyprzedzeniem 0,3 s – płynniejsze ruchy. Podgląd bez opóźnienia."
-            "std" -> if (CamRec.camera != null && !CamRec.stabSupported) "Standardowa – ten telefon nie udostępnia jej aplikacjom; użyj trybu Sport." else "Standardowa: systemowa stabilizacja aparatu."
-            else -> "Wyłączona"
-        }
+        stabPref?.summary = if (Prefs.stabMode == "level") "Drgania tłumi obiektyw, a aplikacja powoli prostuje przechył horyzontu (kadr przycięty o ok. 20%)."
+            else "Drgania tłumi stabilizacja optyczna obiektywu, bez przycinania kadru." 
     }
 
     override fun onResume() {
