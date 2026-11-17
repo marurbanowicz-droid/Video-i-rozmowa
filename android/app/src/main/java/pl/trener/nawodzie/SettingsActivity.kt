@@ -157,7 +157,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val mins = if (Engine.sessionStart > 0) maxOf(1.0, (System.currentTimeMillis() - Engine.sessionStart) / 60000.0) else 1.0
         dataPref?.summary = if (Engine.role == Engine.Role.NONE) "Brak aktywnej sesji"
             else "Wysłane ${fmtBytes(Engine.bytesSent)} · odebrane ${fmtBytes(Engine.bytesRecv)} · razem ${fmtBytes(tot)} (${fmtBytes((tot / mins).toLong())}/min)"
-        stabPref?.summary = if (Prefs.stabMode == "level") "Drgania tłumi obiektyw, a aplikacja powoli prostuje przechył horyzontu (kadr przycięty o ok. 20%)."
+        stabPref?.summary = if (Prefs.stabMode == "level") "Drgania tłumi obiektyw, a aplikacja powoli prostuje przechył horyzontu (kadr przycięty o ok. 20 proc.)."
             else "Drgania tłumi stabilizacja optyczna obiektywu, bez przycinania kadru." 
     }
 
