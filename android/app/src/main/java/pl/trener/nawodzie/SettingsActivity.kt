@@ -89,6 +89,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         snd.list("gain", "Głośność odbieranego głosu (wzmocnienie)", arrayOf("1× (bez wzmocnienia)", "2×", "3× (zalecane)", "4×", "6×", "8× (może przesterowywać)"), arrayOf("1", "2", "3", "4", "6", "8"), "3")
         if (coach) {
             snd.sw("coach_noise", "Redukcja szumów w rozmowie", "Dotyczy tego, co słyszą zawodnicy. Nagranie wideo dostaje dźwięk bez redukcji.", false)
+            snd.sw("rec_raw", "Nagranie bez redukcji szumów systemu", "Mikrofon bez filtrów telefonu – sygnał startu nie jest tłumiony. Działa po ponownym rozpoczęciu sesji. Używaj w słuchawkach (bez głośnika), żeby nie było echa.", false)
             snd.sw("coach_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru i silnika.", true)
             snd.sw("crosstalk", "Zawodnicy słyszą się nawzajem", "Każdy zawodnik łączy się z każdym – działa też z zawodnikami na stronie (iPhone).", true)
         } else {
@@ -191,6 +192,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "vol_up", "vol_down" -> { Controls.applyVolumeMode(); Engine.reportSettings() }
             "headset_action" -> Engine.reportSettings()
             "note_transcribe", "openai_key" -> {}
+            "rec_raw" -> Notifier.toast("Zmiana zadziała od następnej sesji")
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
             "quality", "stab_mode", "sport_crop", "aspect", "watermark", "stab_offset", "stab_invert" -> {

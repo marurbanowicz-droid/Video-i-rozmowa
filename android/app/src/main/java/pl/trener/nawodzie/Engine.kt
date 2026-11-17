@@ -269,8 +269,9 @@ object Engine {
             factoryInitDone = true
         }
         val a = JavaAudioDeviceModule.builder(app)
-            .setUseHardwareAcousticEchoCanceler(true)
+            .setUseHardwareAcousticEchoCanceler(!(Prefs.recRaw && coachUi))
             .setUseHardwareNoiseSuppressor(ns && role == Role.ATHLETE && !athAsCoach)
+            .apply { if (Prefs.recRaw && coachUi) setAudioSource(if (android.os.Build.VERSION.SDK_INT >= 24) 9 else 6) }   // UNPROCESSED / VOICE_RECOGNITION
             // surowy dźwięk z mikrofonu: najpierw kopia do nagrania (bez wzmocnienia), potem wzmocnienie wysyłanego głosu
             .setAudioRecordDataCallback { format, channels, rate, buf -> onMicData(format, channels, rate, buf) }
             .createAudioDeviceModule()
