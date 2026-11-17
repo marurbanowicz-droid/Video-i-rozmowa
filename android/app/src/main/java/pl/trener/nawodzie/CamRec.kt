@@ -85,7 +85,8 @@ object CamRec {
     @Volatile var curZoom = 1f; private set
     val sportActive get() = stabFx.isNotEmpty()
     private fun releaseStab() { stabFx.forEach { it.processor.release() }; stabFx = emptyList() }
-    private fun modeSuffix(m: String) = when (m) { "super" -> "_SUPER"; "superh" -> "_SUPERH"; "eis" -> "_EIS"; else -> "" }
+    private fun modeSuffix(m: String) = when (m) { "super" -> "_SUPER"; "superh" -> "_SUPERH"; "eis" -> "_EIS"; else -> "" } +
+        (if ((m == "super" || m == "superh") && Prefs.stabRawCal) "_KALIBRACJA" else "")
 
     // ---------------- zoom wirtualny (tryby SUPER) ----------------
     // Użytkownik ustawia zoom „jak na głównym obiektywie” (E). Aplikacja dobiera zoom aparatu (cz) tak, żeby

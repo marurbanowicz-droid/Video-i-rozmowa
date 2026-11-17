@@ -56,6 +56,7 @@ object Prefs {
     val stabRs: Int get() = (sp.getString("stab_rs", "1") ?: "1").toIntOrNull()?.coerceIn(-1, 1) ?: 1
     val stabFScale: Double get() = ((sp.getString("stab_fscale", "100") ?: "100").trim().toDoubleOrNull() ?: 100.0).coerceIn(50.0, 200.0) / 100.0
     val stabLog get() = sp.getBoolean("stab_log", false)
+    val stabRawCal get() = sp.getBoolean("stab_rawcal", false)
     val sportCrop: Float get() = (sp.getString("sport_crop", "1.6") ?: "1.6").toFloatOrNull() ?: 1.6f
     val sportInvH get() = sp.getBoolean("sport_inv_h", false)
     val sportInvV get() = sp.getBoolean("sport_inv_v", false)

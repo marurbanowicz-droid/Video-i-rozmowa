@@ -74,6 +74,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 arrayOf("0.2", "0.35", "0.6", "1.0"), "0.35")
             val cal = cat("SUPER – kalibracja (zaawansowane)", "rec")
             cal.sw("stab_log", "Zapisuj dane kalibracji", "Plik z danymi żyroskopu obok każdego nagrania SUPER (Dokumenty/TrenerNaWodzie/Kalibracja). Włącz tylko do testów.", false)
+            cal.sw("stab_rawcal", "Nagranie kalibracyjne (bez stabilizacji)", "Tryb SUPER nagrywa ten sam kadr bez korekty – do wyliczenia dokładnych parametrów. Pamiętaj, żeby potem wyłączyć.", false)
             cal.edit("stab_t_ms", "Korekta czasu żyroskopu (ms)", "0", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – zostaw 0, chyba że kalibracja wskaże inną wartość." }
             }
@@ -234,7 +235,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "rec_raw" -> Notifier.toast("Zmiana zadziała od następnej sesji")
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "aspect", "watermark", "stab_smooth", "stab_t_ms", "stab_rs", "stab_fscale", "stab_invert" -> {
+            "quality", "stab_mode", "aspect", "watermark", "stab_smooth", "stab_t_ms", "stab_rs", "stab_fscale", "stab_invert", "stab_rawcal" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }
