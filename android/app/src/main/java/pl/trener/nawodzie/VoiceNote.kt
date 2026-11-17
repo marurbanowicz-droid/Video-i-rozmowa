@@ -99,8 +99,8 @@ object VoiceNote {
     }
 
     /** Zapisuje plik w „Dokumenty/TrenerNaWodzie/Notatki”; gdy system nie pozwala na dźwięk w Dokumentach – w Nagraniach. */
-    private fun saveFile(ctx: Context, name: String, mime: String, src: File, audio: Boolean): Uri? {
-        val rel = "Documents/TrenerNaWodzie/Notatki"
+    fun saveFile(ctx: Context, name: String, mime: String, src: File, audio: Boolean, sub: String = "Notatki"): Uri? {
+        val rel = "Documents/TrenerNaWodzie/$sub"
         if (Build.VERSION.SDK_INT >= 29) {
             val attempts = buildList {
                 add(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to rel)
@@ -124,7 +124,7 @@ object VoiceNote {
         }
         return try {
             @Suppress("DEPRECATION")
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "TrenerNaWodzie/Notatki").apply { mkdirs() }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "TrenerNaWodzie/$sub").apply { mkdirs() }
             val f = File(dir, name); src.copyTo(f, true)
             android.media.MediaScannerConnection.scanFile(ctx, arrayOf(f.absolutePath), arrayOf(mime), null)
             Uri.fromFile(f)

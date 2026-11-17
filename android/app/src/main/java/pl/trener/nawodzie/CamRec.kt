@@ -2,7 +2,10 @@ package pl.trener.nawodzie
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.core.CameraInfo
 import android.net.Uri
 import android.util.Log
 import android.view.Surface
@@ -82,7 +85,43 @@ object CamRec {
     @Volatile var curZoom = 1f; private set
     val sportActive get() = stabFx.isNotEmpty()
     private fun releaseStab() { stabFx.forEach { it.processor.release() }; stabFx = emptyList() }
-    private fun modeSuffix(m: String) = when (m) { "level" -> "_POZ"; else -> "" }
+    private fun modeSuffix(m: String) = when (m) { "super" -> "_SUPER"; "superh" -> "_SUPERH"; "eis" -> "_EIS"; else -> "" }
+
+    // ---------------- zoom wirtualny (tryby SUPER) ----------------
+    // Użytkownik ustawia zoom „jak na głównym obiektywie” (E). Aplikacja dobiera zoom aparatu (cz) tak, żeby
+    // zostawić zapas kadru ok. 1,8× na stabilizację: najpierw obiektyw szeroki, przy zbliżeniu główny.
+    private const val K_NOM = 1.8
+    private const val K_MIN = 1.5
+    private const val E_MAX = 3.0
+    @Volatile var userZoom = 1f; private set
+    @Volatile private var superOn = false
+    private var zR = 1.0; private var zCzMin = 1f; private var zCzMax = 1f
+    private var eMin = 1f; private var eMax = 1f
+    /** Opis, z którego obiektywu korzysta tryb SUPER (do komunikatu). */
+    var superInfo = ""; private set
+    private var logHeader: List<String> = emptyList()
+
+    /** Ogniskowa / dłuższy bok matrycy. Z kilku ogniskowych (aparat logiczny) wybiera najbliższą obiektywowi ~24 mm. */
+    private fun fNormOf(info: CameraInfo, pickMin: Boolean): Double? = try {
+        val c = Camera2CameraInfo.from(info)
+        val fl = c.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val ps = c.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+        if (fl == null || fl.isEmpty() || ps == null) null else {
+            var w = maxOf(ps.width, ps.height).toDouble()
+            val pa = c.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+            val aa = c.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            if (pa != null && aa != null && pa.width > 0) w *= maxOf(aa.width(), aa.height()).toDouble() / maxOf(pa.width, pa.height)
+            val cands = fl.map { it / w }.filter { it in 0.25..1.5 }
+            if (cands.isEmpty()) null else if (pickMin) cands.min() else cands.minBy { Math.abs(it - 0.694) }
+        }
+    } catch (_: Throwable) { null }
+
+    private fun zoomRangeOf(info: CameraInfo): Pair<Float, Float> = try {
+        val c = Camera2CameraInfo.from(info)
+        if (android.os.Build.VERSION.SDK_INT >= 30) c.getCameraCharacteristic(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.let { it.lower to it.upper }
+            ?: (1f to 1f)
+        else 1f to (c.getCameraCharacteristic(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f)
+    } catch (_: Throwable) { 1f to 1f }
     /** Nazwy (bez rozszerzenia) plików roboczych, które są właśnie nagrywane lub zapisywane. */
     private val inUse: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
@@ -114,12 +153,48 @@ object CamRec {
             releaseStab()
             try { overlay?.close() } catch (_: Exception) {}; overlay = null
             val wide = Prefs.aspect == "16:9"
-            val sel = CameraSelector.DEFAULT_BACK_CAMERA
-            val info = try { p.getCameraInfo(sel) } catch (_: Exception) { null }
+            var sel = CameraSelector.DEFAULT_BACK_CAMERA
+            var info = try { p.getCameraInfo(sel) } catch (_: Exception) { null }
             val prevStabOk = info != null && Preview.getPreviewCapabilities(info).isStabilizationSupported
             val vidStabOk = info != null && Recorder.getVideoCapabilities(info).isStabilizationSupported
             val mode = Prefs.stabMode
-            val want = mode == "std"
+            val want = false
+            val superMode = mode == "super" || mode == "superh"
+            superOn = false
+            var fMain = 0.694; var lensR = 1.0; var czMin = 1f
+            if (superMode && info != null) {
+                fMain = fNormOf(info, false) ?: 0.694
+                val rng = zoomRangeOf(info)
+                var czMax = rng.second
+                if (rng.first < 0.9f) {
+                    czMin = rng.first; lensR = 1.0
+                    superInfo = "obiektyw szeroki, przy zbliżeniu główny"
+                } else {
+                    // aparat logiczny nie udostępnia szerokiego obiektywu – szukamy osobnego aparatu szerokokątnego
+                    val uw = try {
+                        p.availableCameraInfos.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+                            .mapNotNull { ci -> fNormOf(ci, true)?.let { ci to it } }.minByOrNull { it.second }
+                    } catch (_: Throwable) { null }
+                    if (uw != null && uw.second < fMain * 0.85) {
+                        sel = uw.first.cameraSelector; info = uw.first
+                        lensR = uw.second / fMain; czMin = 1f
+                        czMax = minOf(zoomRangeOf(uw.first).second, (1.0 / lensR).toFloat())
+                        superInfo = "osobny obiektyw szeroki (zoom do ok. 1,8×)"
+                    } else {
+                        czMin = 1f; lensR = 1.0
+                        superInfo = "tylko obiektyw główny – szeroki jest niedostępny dla aplikacji"
+                    }
+                }
+                fMain *= Prefs.stabFScale
+                zR = lensR; zCzMin = czMin
+                eMin = (lensR * czMin * K_MIN).toFloat()
+                eMax = minOf(E_MAX, lensR * czMax * K_NOM).toFloat().coerceAtLeast(eMin)
+                zCzMax = (eMax / (lensR * K_NOM)).toFloat().coerceIn(czMin, czMax)
+                logHeader = listOf("model=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}", "sdk=${android.os.Build.VERSION.SDK_INT}",
+                    "mode=$mode", "lens=$superInfo", "fMain=$fMain lensR=$lensR czMin=$czMin czMax=$czMax eMin=$eMin eMax=$eMax",
+                    "sensorRotation=${info.sensorRotationDegrees} quality=${Prefs.quality} aspect=${Prefs.aspect}",
+                    "timestampSource=" + (try { Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) } catch (_: Throwable) { null }))
+            }
             val (q, br) = when (Prefs.quality) {
                 "HD" -> Quality.HD to 6_000_000
                 "UHD" -> Quality.UHD to 40_000_000
@@ -136,11 +211,19 @@ object CamRec {
             if (want && prevStabOk) pb.setPreviewStabilizationEnabled(true)
             val vb = VideoCapture.Builder(recorder).setTargetRotation(rotation)
             if (want && !prevStabOk && vidStabOk) vb.setVideoStabilizationEnabled(true)
-            val glMode = mode == "level" || mode == "sport" || mode == "horizon" || mode == "horizon2"
-            // tryb Poziom zostawia optyczną stabilizację obiektywu włączoną – to ona najlepiej tłumi drgania
-            if (glMode && mode != "level") {
-                // Tryby Sport/Horyzont same korygują ruch na podstawie żyroskopu. Optyczna stabilizacja obiektywu musi być wtedy
-                // wyłączona – inaczej drobne drgania byłyby korygowane dwa razy (raz przez obiektyw, raz przez aplikację).
+            val glMode = superMode
+            if (mode == "eis") {
+                val modes = try { info?.let { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) } } catch (_: Throwable) { null }
+                if (modes?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) try {
+                    Camera2Interop.Extender(pb).setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                    Camera2Interop.Extender(vb).setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                } catch (e: Throwable) { Log.w(TAG, "eis", e) }
+                else Notifier.toast("Ten telefon nie udostępnia aplikacjom stabilizacji elektronicznej – działa tylko optyczna")
+            }
+            if (glMode) {
+                // dane każdej klatki (czas naświetlania i odczytu matrycy, zoom) – potrzebne do dokładnej korekty
+                try { Camera2Interop.Extender(pb).setSessionCaptureCallback(FrameMeta.callback) } catch (e: Throwable) { Log.w(TAG, "meta", e) }
+                // Stabilizację liczy aplikacja z żyroskopu – optyczna musi być wyłączona, inaczej drgania byłyby korygowane dwa razy.
                 try {
                     Camera2Interop.Extender(pb).setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                     Camera2Interop.Extender(vb).setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
@@ -156,20 +239,20 @@ object CamRec {
                 val sr = info?.sensorRotationDegrees ?: 90
                 try {
                     // osobne efekty dla podglądu i nagrania: nagranie może być opóźnione (Horyzont płynny), podgląd nie
-                    val pe = StabEffect(CameraEffect.PREVIEW, StabProcessor(ctx, mode, sr, CameraEffect.PREVIEW))
-                    val ve = StabEffect(CameraEffect.VIDEO_CAPTURE, StabProcessor(ctx, mode, sr, CameraEffect.VIDEO_CAPTURE))
+                    val pe = StabEffect(CameraEffect.PREVIEW, StabProcessor(ctx, mode, sr, CameraEffect.PREVIEW, fMain, lensR, czMin))
+                    val ve = StabEffect(CameraEffect.VIDEO_CAPTURE, StabProcessor(ctx, mode, sr, CameraEffect.VIDEO_CAPTURE, fMain, lensR, czMin))
                     stabFx = listOf(pe, ve)
                     val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(pe).addEffect(ve).build()
-                    p.bindToLifecycle(o, sel, group)
+                    p.bindToLifecycle(o, sel, group).also { superOn = true }
                 } catch (e: Exception) {
                     Log.w(TAG, "stab x2", e)
                     releaseStab(); p.unbindAll()
                     try {
                         val both = CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE
-                        val eff = StabEffect(both, StabProcessor(ctx, mode, sr, both))
+                        val eff = StabEffect(both, StabProcessor(ctx, mode, sr, both, fMain, lensR, czMin))
                         stabFx = listOf(eff)
                         val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(eff).build()
-                        p.bindToLifecycle(o, sel, group)
+                        p.bindToLifecycle(o, sel, group).also { superOn = true }
                     } catch (e2: Exception) {
                         Log.e(TAG, "stab", e2)
                         releaseStab(); p.unbindAll()
@@ -197,6 +280,7 @@ object CamRec {
                 if (k != lastZoomKey) { lastZoomKey = k; notifyChange() }
             }
             preview = pv; videoCapture = vc
+            if (superOn) setZoom(userZoom.coerceIn(eMin, eMax))
         } catch (e: Exception) {
             Log.e(TAG, "bind", e); Notifier.toast("Błąd kamery: ${e.message}")
         }
@@ -268,12 +352,20 @@ object CamRec {
         if (recording == null) videoCapture?.targetRotation = r
     }
 
-    fun setZoom(ratio: Float) { camera?.cameraControl?.setZoomRatio(ratio) }
+    fun setZoom(ratio: Float) {
+        if (superOn) {
+            userZoom = ratio.coerceIn(eMin, eMax)
+            val cz = (userZoom / (zR * K_NOM)).toFloat().coerceIn(zCzMin, zCzMax)
+            camera?.cameraControl?.setZoomRatio(cz)
+        } else camera?.cameraControl?.setZoomRatio(ratio)
+    }
+    /** Zakres zoomu dla pokrętła. W trybach SUPER – ograniczony do wartości, przy których stabilizacja ma zapas kadru. */
     fun zoomRange(): Pair<Float, Float> {
+        if (superOn) return eMin to eMax
         val z = camera?.cameraInfo?.zoomState?.value ?: return 1f to 1f
         return z.minZoomRatio to z.maxZoomRatio
     }
-    fun zoomRatio(): Float = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
+    fun zoomRatio(): Float = if (superOn) userZoom else camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
 
     private fun notifyChange() = onMain { onChange?.invoke(); Engine.changed() }
 
@@ -298,6 +390,7 @@ object CamRec {
         videoRotation = rotation
         // tryb stabilizacji i opóźnienie obrazu (Horyzont płynny) – potrzebne przy zapisie, także po odzyskaniu nagrania
         try { File(dir, "$base.info").writeText("${modeSuffix(Prefs.stabMode)};$videoDelayMs") } catch (_: Exception) {}
+        if (Prefs.stabLog && superOn) StabLog.start(File(dir, "$base.gyro.csv"), logHeader + "video_started_ms=$started")
         val sink: (ByteArray, Int, Int) -> Unit = { data, sr, ch -> pw.write(data, sr, ch) }
         inUse.add(base)
         try {
@@ -308,6 +401,7 @@ object CamRec {
                         is VideoRecordEvent.Finalize -> {
                             if (Engine.pcmSink === sink) Engine.pcmSink = null
                             pw.close()
+                            StabLog.stop()
                             recording = null
                             videoRotation = rotation
                             // orientacja mogła się zmienić w trakcie nagrania – następne nagranie ma mieć aktualną
@@ -344,7 +438,7 @@ object CamRec {
     }
 
     private fun cleanup(dir: File, base: String) {
-        for (ext in listOf("mp4", "pcm", "meta", "info", "aac.tmp")) try { File(dir, "$base.$ext").delete() } catch (_: Exception) {}
+        for (ext in listOf("mp4", "pcm", "meta", "info", "aac.tmp", "gyro.csv")) try { File(dir, "$base.$ext").delete() } catch (_: Exception) {}
     }
 
     /** Zapis nagrania w Galerii: wideo + dźwięk. Pliki robocze znikają dopiero po udanym zapisie. Wywoływać z wątku w tle. */
@@ -364,6 +458,12 @@ object CamRec {
         }
         when {
             uri != null -> {
+                val log = File(dir, "$base.gyro.csv")
+                if (log.exists() && log.length() > 0) try {
+                    val name = "trening_" + java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US).format(java.util.Date(started)) + suffix + "_dane.csv"
+                    if (VoiceNote.saveFile(app, name, "text/csv", log, audio = false, sub = "Kalibracja") != null)
+                        Notifier.toast("Dane kalibracji: Dokumenty/TrenerNaWodzie/Kalibracja")
+                } catch (e: Throwable) { Log.w(TAG, "log export", e) }
                 cleanup(dir, base)
                 lastUri = uri
                 Notifier.toast(when {

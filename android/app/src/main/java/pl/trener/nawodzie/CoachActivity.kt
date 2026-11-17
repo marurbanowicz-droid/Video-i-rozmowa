@@ -367,7 +367,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private fun stabMenu(anchor: View) {
         if (CamRec.recording != null) { Notifier.toast("Zatrzymaj nagrywanie, aby zmienić stabilizację"); return }
         val pm = PopupMenu(this, anchor)
-        val opts = listOf("off" to "Optyczna (obiektyw)", "level" to "Optyczna + poziom horyzontu")
+        val opts = listOf("off" to "OIS – optyczna (obiektyw)", "eis" to "EIS – elektroniczna systemowa",
+            "super" to "SUPER – jak Super Steady", "superh" to "SUPER+H – Super + poziomy horyzont")
         opts.forEachIndexed { i, (_, label) -> pm.menu.add(0, i, i, label).isCheckable = true }
         pm.menu.setGroupCheckable(0, true, true)
         pm.menu.getItem(opts.indexOfFirst { it.first == Prefs.stabMode }.coerceAtLeast(0)).isChecked = true
@@ -376,7 +377,11 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             Prefs.sp.edit().putString("stab_mode", m).apply()
             CamRec.rebind()
             mainHandler.postDelayed({
-                Notifier.toast(if (m == "level") "Optyczna stabilizacja + prostowanie horyzontu (kadr lekko przycięty)" else "Optyczna stabilizacja obiektywu"); refresh()
+                Notifier.toast(when (m) {
+                    "super", "superh" -> "SUPER: ${CamRec.superInfo}. Zoom ograniczony do zakresu, w którym działa stabilizacja. Nagranie jest płynniejsze niż podgląd."
+                    "eis" -> "Stabilizacja elektroniczna systemu (z optyczną)"
+                    else -> "Optyczna stabilizacja obiektywu"
+                }); refresh()
             }, 800)
             true
         }
@@ -424,8 +429,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         evBox.visibility = if (CamRec.camera == null || CamRec.evSupported()) View.VISIBLE else View.GONE
         qualityPill.text = when (Prefs.quality) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
         val sm = Prefs.stabMode
-        stabPill.text = if (sm == "level") "OIS+POZ" else "OIS"
-        val stabOn = sm == "level"
+        stabPill.text = when (sm) { "eis" -> "EIS"; "super" -> "SUPER"; "superh" -> "SUPER+H"; else -> "OIS" }
+        val stabOn = sm != "off"
         stabPill.setTextColor(if (stabOn) ACCENT else Color.WHITE)
         stabPill.compoundDrawablesRelative[0]?.mutate()?.setTint(if (stabOn) ACCENT else Color.WHITE)
         noiseBtn.state(Prefs.coachNoise)
