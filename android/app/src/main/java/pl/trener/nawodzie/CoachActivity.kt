@@ -512,6 +512,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         val box = column(16).apply {
             gravity = Gravity.START
             addView(head, lp())
+            addView(button("Kto kogo słyszy…") { hearDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, lp(top = dp(8)))
             if (isHost) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(button("Zadzwoń…") { callDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
@@ -605,6 +606,35 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         dlg.setOnShowListener { Engine.addUi(ui) }
         dlg.setOnDismissListener { Engine.removeUi(ui) }
         dlg.show()
+    }
+
+    // ---------------- kto kogo słyszy ----------------
+    private class Person(val id: String, val label: String, val coach: Boolean)
+
+    private fun hearDialog() {
+        val ps = ArrayList<Person>()
+        ps.add(Person(Engine.HOST, if (isHost) "Ty" else "Trener główny", true))
+        if (!isHost) ps.add(Person(Prefs.cid, "Ty", true))
+        Engine.athletesView.forEach { ps.add(Person(it.cid, it.name, it.coach)) }
+        val cross = if (isHost) Prefs.crosstalk else Engine.athCross
+        val box = column(16).apply { gravity = Gravity.START }
+        box.addView(text("Włącz u każdej osoby tych, których ma słyszeć. Zmiana działa od razu.", 12f, col(R.color.mut)), lp())
+        if (!cross) box.addView(text("Zawodnicy nie słyszą się nawzajem (wyłączone w ustawieniach) – tych par tu nie ma.", 12f, col(R.color.mut)), lp(top = dp(4)))
+        for (l in ps) {
+            val rows = ps.filter { it.id != l.id && (cross || l.coach || it.coach) }
+            if (rows.isEmpty()) continue
+            box.addView(text("${l.label} słyszy:", 15f, bold = true), lp(top = dp(16)))
+            for (s in rows) {
+                val sw = androidx.appcompat.widget.SwitchCompat(this).apply {
+                    text = s.label; setTextColor(col(R.color.txt)); textSize = 14f
+                    isChecked = Engine.hears(l.id, s.id)
+                    setOnCheckedChangeListener { _, on -> Engine.setHears(l.id, s.id, on) }
+                }
+                box.addView(sw, lp(top = dp(4)))
+            }
+        }
+        MaterialAlertDialogBuilder(this).setTitle("Kto kogo słyszy").setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Zamknij", null).show()
     }
 
     // ---------------- zdalne ustawienia zawodnika ----------------

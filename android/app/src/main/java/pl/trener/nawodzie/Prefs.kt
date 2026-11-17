@@ -115,6 +115,10 @@ object Prefs {
         set(v) = sp.edit().putBoolean("was_athlete", v).apply()
     fun standbyId() = "tnw-a-" + cid.lowercase()
 
+    // ---------- kto kogo NIE słyszy (pary „słuchacz|mówiący”, osobno dla każdego pokoju) ----------
+    fun block(code: String): Set<String> = sp.getStringSet("block_$code", emptySet())?.toSet() ?: emptySet()
+    fun setBlock(code: String, v: Set<String>) = sp.edit().putStringSet("block_$code", v.toSet()).apply()
+
     // ---------- historia pokoju (kto już był) ----------
     data class Seen(val cid: String, val name: String, val last: Long, val app: Boolean)
     fun history(code: String): List<Seen> {

@@ -35,6 +35,8 @@ object Engine {
     enum class Role { NONE, COACH, ATHLETE }
 
     const val PREFIX = "trener-na-wodzie-v1-"
+    /** Identyfikator trenera głównego w ustawieniach „kto kogo słyszy”. */
+    const val HOST = "host"
 
     /**
      * Wiadomość „pozapołączeniowa” (dzwonienie, odrzucenie). Serwer PeerJS przepuszcza tylko OFFER typu media/data
@@ -85,7 +87,8 @@ object Engine {
     @Volatile var athletesView: List<AthleteView> = emptyList(); private set
 
     data class RosterItem(val id: String, val name: String, val on: Boolean, val pid: String = "",
-                          val coach: Boolean = false, val bat: Int = -1, val cfg: Map<String, String> = emptyMap())
+                          val coach: Boolean = false, val bat: Int = -1, val cfg: Map<String, String> = emptyMap(),
+                          val hostHears: Boolean = true, val hearsHost: Boolean = true)
     /** Drugi trener w pokoju: dołącza jak zawodnik (przez trenera głównego), ale ma ekran trenera (kamera, nagrywanie). */
     @Volatile var athAsCoach = false; private set
     /** Ekran trenera (wizjer) obsługuje zarówno trenera głównego, jak i drugiego trenera. */
@@ -173,6 +176,8 @@ object Engine {
     private val coMuted = HashSet<String>()
     private val coSendOff = HashSet<String>()
     private val coVolSent = HashSet<String>()
+    /** Pary „słuchacz|mówiący”, których słuchacz NIE słyszy (trener główny rozsyła je wszystkim w liście osób). */
+    @Volatile private var blockSet: Set<String> = emptySet()
     /** Zawodnik / trener: głośność głosu poszczególnych trenerów (ustawiana przez nich samych). */
     private val coachVols = HashMap<String, Float>()
     /** Połączenia głosowe zawodnik ↔ zawodnik (każdy z każdym). Klucz: cid drugiego zawodnika. */
@@ -190,6 +195,7 @@ object Engine {
         if (role != Role.NONE) return
         StandbyService.releaseIds()   // czuwanie zwalnia identyfikatory pokoi, zanim sesja je zajmie
         role = Role.COACH; micOn = true; fullMute = false; pttActive = false; resetStats()
+        blockSet = Prefs.block(Prefs.currentRoom().code)
         try { initRtc(Prefs.coachNoise, Prefs.coachWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); Notifier.toast("Błąd audio: ${e.message}") }
         startLoopback()
         ice = buildIce()
@@ -208,7 +214,7 @@ object Engine {
     private fun startAthleteNow(code: String, name: String, asCoach: Boolean) {
         if (role != Role.NONE) return
         StandbyService.releaseIds()
-        athAsCoach = asCoach; micOn = true; noteMute = false; coMuted.clear(); coSendOff.clear(); coVolSent.clear(); coachVols.clear()
+        athAsCoach = asCoach; micOn = true; noteMute = false; coMuted.clear(); coSendOff.clear(); coVolSent.clear(); coachVols.clear(); blockSet = emptySet()
         role = Role.ATHLETE; fullMute = false; pttActive = false; resetStats()
         athPeerId = "tnw-" + Prefs.cid.lowercase() + "-" + Prefs.genCode(4).lowercase()
         athCode = code; athName = if (asCoach && !name.startsWith("Trener ")) "Trener $name" else name
@@ -232,7 +238,7 @@ object Engine {
     private fun teardown() {
         timers.forEach { it.cancel(false) }; timers.clear()
         reconnectF?.cancel(false); reconnectF = null
-        role = Role.NONE; fullMute = false; pttActive = false; soloCid = null; athAsCoach = false; noteMute = false
+        role = Role.NONE; fullMute = false; pttActive = false; soloCid = null; athAsCoach = false; noteMute = false; blockSet = emptySet()
         links.values.toList().forEach { closeLink(it) }
         links.clear(); athletes.clear(); dataLinks.clear(); mesh.clear(); meshUp = emptySet(); athMedia = null; athData = null
         signal?.close(); signal = null; signalOpen = false
@@ -633,6 +639,7 @@ object Engine {
                     }
                     snapshot(); changed()
                 }
+                "blk" -> if (athletes[l.cid]?.coach == true) applyHears(o.optString("l"), o.optString("s"), o.optBoolean("on", true))
                 // drugi trener steruje zawodnikiem przez trenera głównego
                 "fwd" -> if (athletes[l.cid]?.coach == true) {
                     val tgt = o.optString("cid")
@@ -664,7 +671,9 @@ object Engine {
             val t = l.remote ?: continue
             val a = if (role == Role.COACH) athletes.values.firstOrNull { it.media === l } else null
             val coCid = if (athAsCoach && l.mesh) l.cid else null
-            val muted = a?.muted == true || (coCid != null && coCid in coMuted)
+            val speaker = if (role == Role.ATHLETE) (if (l === athMedia) HOST else l.cid) else null
+            val blocked = speaker != null && speaker != HOST && "${Prefs.cid}|$speaker" in blockSet
+            val muted = a?.muted == true || blocked || (coCid != null && coCid in coMuted)
             val f = when {
                 a != null -> a.recvVol
                 coCid != null -> Prefs.athRecvVol(coCid)
@@ -772,9 +781,10 @@ object Engine {
         val list = JSONArray()
         athletes.values.forEach {
             list.put(JSONObject().put("id", it.cid).put("name", it.name).put("on", it.status == "online").put("pid", it.media?.peer ?: "")
-                .put("coach", it.coach).put("bat", it.battery).put("cfg", JSONObject(it.cfg as Map<*, *>)))
+                .put("coach", it.coach).put("bat", it.battery).put("hh", !it.muted).put("hs", it.sendOn).put("cfg", JSONObject(it.cfg as Map<*, *>)))
         }
-        return JSONObject().put("t", "roster").put("room", r.name).put("code", r.code).put("cross", Prefs.crosstalk).put("list", list)
+        val blk = JSONArray(); blockSet.forEach { blk.put(it) }
+        return JSONObject().put("t", "roster").put("block", blk).put("room", r.name).put("code", r.code).put("cross", Prefs.crosstalk).put("list", list)
     }
 
     private fun broadcast(o: JSONObject) = dataLinks.values.forEach { dcSend(it, o) }
@@ -854,6 +864,38 @@ object Engine {
         Notifier.toast(if (soloCid != null) "Mówisz tylko do: ${a?.name}" else "Mówisz do wszystkich")
     }
 
+    // ---- kto kogo słyszy ----
+    fun hears(l: String, s: String): Boolean {
+        if (l == s) return true
+        if (role == Role.COACH) {
+            if (l == HOST) return athletes[s]?.muted == false
+            if (s == HOST) return athletes[l]?.sendOn ?: true
+        } else {
+            if (l == HOST) return athRosterMap?.get(s)?.hostHears ?: true
+            if (s == HOST) return athRosterMap?.get(l)?.hearsHost ?: true
+        }
+        return "$l|$s" !in blockSet
+    }
+
+    private fun applyHears(l: String, s: String, h: Boolean) {
+        when {
+            l == HOST -> athletes[s]?.let { it.muted = !h; applyRemote() }
+            s == HOST -> athletes[l]?.let { it.sendOn = h; applySend(it) }
+            else -> {
+                val k = "$l|$s"
+                blockSet = if (h) blockSet - k else blockSet + k
+                Prefs.setBlock(Prefs.currentRoom().code, blockSet); applyRemote()
+            }
+        }
+        snapshot(); changed(); broadcastRoster()
+    }
+
+    /** Ustawia, czy [l] słyszy [s] (trener główny – od razu, drugi trener – przez trenera głównego). */
+    fun setHears(l: String, s: String, h: Boolean) = exec.execute {
+        if (role == Role.COACH) applyHears(l, s, h)
+        else if (role == Role.ATHLETE && athAsCoach) athData?.let { dcSend(it, JSONObject().put("t", "blk").put("l", l).put("s", s).put("on", h)) }
+    }
+
     /** Zmienia ustawienie w aplikacji zawodnika (trener główny – bezpośrednio, drugi trener – przez trenera głównego). */
     fun setAthleteSetting(cid: String, key: String, value: String) = exec.execute {
         if (role == Role.COACH) {
@@ -869,6 +911,7 @@ object Engine {
         athletes.keys.toList().forEach { dropAthlete(it) }
         dataLinks.values.toList().forEach { closeLink(it) }; dataLinks.clear()
         Prefs.setCurrentRoom(code)
+        blockSet = Prefs.block(code)
         connectSignal(PREFIX + code)
         changed()
     }
@@ -1022,11 +1065,14 @@ object Engine {
             "roster" -> {
                 athRoomName = o.optString("room")
                 athCross = o.optBoolean("cross", false)
+                val bj = o.optJSONArray("block")
+                val nb = HashSet<String>(); if (bj != null) for (i in 0 until bj.length()) nb.add(bj.getString(i))
+                if (nb != blockSet) { blockSet = nb; applyRemote() }
                 val arr = o.optJSONArray("list") ?: JSONArray()
                 val next = LinkedHashMap<String, RosterItem>()
                 for (i in 0 until arr.length()) { val x = arr.getJSONObject(i); 
                     val cj = x.optJSONObject("cfg"); val cm = HashMap<String, String>(); cj?.keys()?.forEach { k -> cm[k] = cj.optString(k) }
-                    next[x.optString("id")] = RosterItem(x.optString("id"), x.optString("name"), x.optBoolean("on"), x.optString("pid"), x.optBoolean("coach"), x.optInt("bat", -1), cm) }
+                    next[x.optString("id")] = RosterItem(x.optString("id"), x.optString("name"), x.optBoolean("on"), x.optString("pid"), x.optBoolean("coach"), x.optInt("bat", -1), cm, x.optBoolean("hh", true), x.optBoolean("hs", true)) }
                 val prev = athRosterMap
                 if (prev != null) {
                     for ((id, x) in next) {
