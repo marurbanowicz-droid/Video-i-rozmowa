@@ -562,10 +562,9 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL; background = roundBg(col(R.color.card2), dp(14).toFloat()); setPadding(dp(12), dp(10), dp(12), dp(10))
                     addView(name); addView(info)
-                    addView(line(send, "Nadaję", if (isHost) slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }
-                        else text("włącz / wyłącz mój głos u tej osoby", 12f, col(R.color.mut)).apply { setPadding(dp(8), 0, 0, 0) }), lp(top = dp(6)))
+                    addView(line(send, "Nadaję", slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }), lp(top = dp(6)))
                     addView(line(recv, "Odbieram", slider(a.recvVol) { v -> Engine.setAthleteRecvVol(a.cid, v) }), lp(top = dp(4)))
-                    if (isHost) addView(solo, lp(top = dp(6)))
+                    addView(solo, lp(top = dp(6)))
                     if (a.app) addView(text("⚙ Ustawienia zawodnika…", 13f, bold = true).apply {
                         gravity = Gravity.CENTER; setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundBg(col(R.color.card), dp(12).toFloat())
                         setOnClickListener { athleteSettings(a.cid) }

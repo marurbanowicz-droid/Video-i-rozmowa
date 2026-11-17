@@ -172,6 +172,9 @@ object Engine {
     /** Drugi trener: lokalne wyciszenia / wyłączenia nadawania wybranych osób. */
     private val coMuted = HashSet<String>()
     private val coSendOff = HashSet<String>()
+    private val coVolSent = HashSet<String>()
+    /** Zawodnik / trener: głośność głosu poszczególnych trenerów (ustawiana przez nich samych). */
+    private val coachVols = HashMap<String, Float>()
     /** Połączenia głosowe zawodnik ↔ zawodnik (każdy z każdym). Klucz: cid drugiego zawodnika. */
     private val mesh = HashMap<String, Link>()
 
@@ -205,7 +208,7 @@ object Engine {
     private fun startAthleteNow(code: String, name: String, asCoach: Boolean) {
         if (role != Role.NONE) return
         StandbyService.releaseIds()
-        athAsCoach = asCoach; micOn = true; noteMute = false; coMuted.clear(); coSendOff.clear()
+        athAsCoach = asCoach; micOn = true; noteMute = false; coMuted.clear(); coSendOff.clear(); coVolSent.clear(); coachVols.clear()
         role = Role.ATHLETE; fullMute = false; pttActive = false; resetStats()
         athPeerId = "tnw-" + Prefs.cid.lowercase() + "-" + Prefs.genCode(4).lowercase()
         athCode = code; athName = if (asCoach && !name.startsWith("Trener ")) "Trener $name" else name
@@ -665,6 +668,7 @@ object Engine {
             val f = when {
                 a != null -> a.recvVol
                 coCid != null -> Prefs.athRecvVol(coCid)
+                l.mesh && (l.cid?.let { coachVols.containsKey(it) } == true) -> coachVols[l.cid!!] ?: 1f
                 role == Role.ATHLETE && l === athMedia -> athCoachVol
                 else -> 1f
             }
@@ -822,6 +826,11 @@ object Engine {
         a.recvVol = v.coerceIn(0f, 2f); Prefs.setAthRecvVol(cid, a.recvVol); applyRemote(); snapshot(); changed()
     }
     fun setAthleteSendVol(cid: String, v: Float) = exec.execute {
+        if (role == Role.ATHLETE && athAsCoach) {
+            val x = v.coerceIn(0f, 2f); Prefs.setAthSendVol(cid, x)
+            athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", x.toString())) }
+            snapshotCo(); changed(); return@execute
+        }
         val a = athletes[cid] ?: return@execute
         a.sendVol = v.coerceIn(0f, 2f); Prefs.setAthSendVol(cid, a.sendVol)
         dataLinks[cid]?.let { dcSend(it, JSONObject().put("t", "vol").put("v", a.sendVol.toDouble())) }
@@ -829,6 +838,13 @@ object Engine {
     }
     /** Rozmowa tylko z jednym zawodnikiem (null = znów do wszystkich). */
     fun setSolo(cid: String?) = exec.execute {
+        if (role == Role.ATHLETE && athAsCoach) {
+            soloCid = if (cid != null && athRosterMap?.get(cid)?.on == true) cid else null
+            applyMeshSend(); snapshotCo(); changed()
+            Notifier.beep(if (soloCid != null) "ptt" else "ptt_off")
+            Notifier.toast(if (soloCid != null) "Mówisz tylko do: ${athRosterMap?.get(cid)?.name}" else "Mówisz do wszystkich")
+            return@execute
+        }
         if (role != Role.COACH) return@execute
         val a = if (cid != null) athletes[cid] else null
         soloCid = if (a != null && a.status == "online") cid else null
@@ -937,6 +953,7 @@ object Engine {
     private var lastRemoteToast = 0L
     /** Polecenie zmiany ustawienia od trenera. Wartości są sprawdzane – nieznane klucze i wartości są ignorowane. */
     private fun applyRemoteSetting(k: String, s: String) {
+        if (k.startsWith("cvol_")) { s.toFloatOrNull()?.let { coachVols[k.removePrefix("cvol_")] = it.coerceIn(0f, 3f); applyRemote() }; return }
         val ed = Prefs.sp.edit()
         val actions = setOf("volume", "mute_all", "mute_mic", "ptt", "record", "note")
         when (k) {
@@ -1044,13 +1061,19 @@ object Engine {
 
     /** Drugi trener: wyłączone osoby nie słyszą jego głosu (osobno dla każdej z nich). */
     private fun applyMeshSend() {
-        if (coSendOff.isEmpty() && mesh.isEmpty()) return
-        for ((cid, l) in mesh) {
-            val pc = l.pc ?: continue
+        fun set(pc: PeerConnection?, on: Boolean) {
+            pc ?: return
             for (s in pc.senders) {
                 if (s.track()?.kind() != MediaStreamTrack.AUDIO_TRACK_KIND) continue
-                try { val p = s.parameters; val on = cid !in coSendOff; if (p.encodings.any { it.active != on }) { for (e in p.encodings) e.active = on; s.setParameters(p) } } catch (_: Exception) {}
+                try { val p = s.parameters; if (p.encodings.any { it.active != on }) { for (e in p.encodings) e.active = on; s.setParameters(p) } } catch (_: Exception) {}
             }
+        }
+        for ((cid, l) in mesh) set(l.pc, cid !in coSendOff && (soloCid == null || soloCid == cid))
+        set(athMedia?.pc, soloCid == null)   // rozmowa z jedną osobą: trener główny też jej nie słyszy
+        // głośność mojego głosu u poszczególnych osób – wysyłamy po nawiązaniu połączenia
+        for ((cid, l) in mesh) if (isUp(l) && coVolSent.add(l.connId)) {
+            val v = Prefs.athSendVol(cid)
+            if (v != 1f) athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", v.toString())) }
         }
     }
 
@@ -1058,7 +1081,7 @@ object Engine {
     private fun snapshotCo() {
         athletesView = athRoster.filter { it.id != Prefs.cid }.map { x ->
             val l = mesh[x.id]
-            AthleteView(x.id, x.name, if (x.on) "online" else "offline", x.id in coMuted, x.id !in coSendOff, Prefs.athRecvVol(x.id), 1f,
+            AthleteView(x.id, x.name, if (x.on) "online" else "offline", x.id in coMuted, x.id !in coSendOff, Prefs.athRecvVol(x.id), Prefs.athSendVol(x.id),
                 x.bat, l?.rttMs ?: -1, l?.lossPct ?: -1, true, x.coach, x.cfg)
         }
     }

@@ -17,12 +17,14 @@ object Updater {
     data class Release(val version: String, val apkUrl: String, val page: String, val size: Long = -1)
 
     @Volatile var available: Release? = null; private set
+    /** Najnowsza wersja znaleziona przy ostatnim sprawdzeniu (także gdy nie jest nowsza od zainstalowanej). */
+    @Volatile var latestSeen: String? = null; private set
 
     fun check(cb: (Release?, String?) -> Unit) {
         Thread {
             try {
                 val req = Request.Builder().url("https://api.github.com/repos/${BuildConfig.GH_REPO}/releases?per_page=15")
-                    .header("Accept", "application/vnd.github+json").build()
+                    .header("Accept", "application/vnd.github+json").header("Cache-Control", "no-cache").build()
                 val body = PeerSignal.http.newCall(req).execute().use { r ->
                     if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")
                     r.body?.string() ?: "[]"
@@ -44,6 +46,7 @@ object Updater {
                     if (apk == null) continue
                     if (best == null || cmpVer(v, best.version) > 0) best = Release(v, apk, o.optString("html_url"), size)
                 }
+                latestSeen = best?.version
                 val newer = best?.takeIf { cmpVer(it.version, BuildConfig.VERSION_NAME) > 0 }
                 available = newer
                 onMain { cb(newer, null) }
