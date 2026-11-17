@@ -176,6 +176,9 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
         // ---- elementy pasa górnego / lewego ----
         val settingsBtn = iconBtn(R.drawable.ic_settings, 38) { openSettings() }
+        val endBtn = pillText("⏻ Zakończ").apply {
+            setTextColor(Color.parseColor("#FF6B63")); setOnClickListener { confirmEnd() }
+        }
         qualityPill = pillText("FHD").apply { setOnClickListener { qualityMenu(it) } }
         stabPill = pillText("STAB").apply {
             setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_stab, 0, 0, 0); compoundDrawablePadding = dp(6)
@@ -205,7 +208,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         if (!landscape) {
             val row1 = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                addView(settingsBtn)
+                addView(settingsBtn); addView(gap(6)); addView(endBtn)
                 addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
                 addView(qualityPill); addView(gap(6)); addView(stabPill); addView(gap(6)); addView(noiseBtn)
                 addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
@@ -233,6 +236,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
                     addView(settingsBtn); addView(gap(8)); addView(noiseBtn)
                 })
+                addView(endBtn, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(qualityPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(stabPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(evBox, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
@@ -726,6 +730,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             .setNeutralButton("Usuń zaznaczone z listy") { _, _ ->
                 list.filterIndexed { i, _ -> checked[i] }.forEach { Prefs.removeHistory(r.code, it.cid) }; listSig = ""; refresh()
             }
+            .setNegativeButton("Anuluj", null).show()
+    }
+
+    private fun confirmEnd() {
+        val rec = CamRec.recording != null
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setMessage(if (rec) "Zakończyć sesję? Trwające nagranie zostanie zapisane, a wszyscy zostaną rozłączeni." else "Zakończyć sesję i rozłączyć wszystkich?")
+            .setPositiveButton("Zakończ") { _, _ -> SessionService.endSession(this); finish() }
             .setNegativeButton("Anuluj", null).show()
     }
 
