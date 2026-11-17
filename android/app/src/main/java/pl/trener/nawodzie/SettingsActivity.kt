@@ -21,6 +21,14 @@ class SettingsActivity : AppCompatActivity() {
 }
 
 class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedPreferenceChangeListener {
+    companion object {
+        val SECTIONS = listOf(
+            Triple("rec", "Nagrywanie i obraz", "Jakość, proporcje, stabilizacja, synchronizacja dźwięku"),
+            Triple("talk", "Rozmowa i przyciski", "Tryb rozmowy, przyciski głośności i słuchawek"),
+            Triple("snd", "Dźwięk i notatki", "Mikrofon, głośność, redukcja szumów, notatki głosowe"),
+            Triple("net", "Połączenie i powiadomienia", "Jakość rozmowy, zużycie danych, sygnały, czuwanie w tle"),
+            Triple("app", "Aplikacja", "Aktualizacja, bateria, zamykanie"))
+    }
     private var coach = true
     private var updPref: Preference? = null
     private var dataPref: Preference? = null
@@ -33,7 +41,10 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val screen: PreferenceScreen = preferenceManager.createPreferenceScreen(ctx)
         preferenceScreen = screen
 
-        fun cat(t: String) = PreferenceCategory(ctx).apply { title = t; isIconSpaceReserved = false }.also { screen.addPreference(it) }
+        val sec = arguments?.getString("sec")
+        val cats = ArrayList<Pair<PreferenceCategory, String>>()
+        fun cat(t: String, s: String) = PreferenceCategory(ctx).apply { title = t; isIconSpaceReserved = false }
+            .also { screen.addPreference(it); cats.add(it to s) }
         fun PreferenceCategory.sw(k: String, t: String, s: String?, def: Boolean) = SwitchPreferenceCompat(ctx).apply {
             key = k; title = t; summary = s; setDefaultValue(def); isIconSpaceReserved = false
         }.also { addPreference(it) }
@@ -51,7 +62,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         }.also { addPreference(it) }
 
         if (coach) {
-            val img = cat("Obraz i nagrywanie")
+            val img = cat("Obraz i nagrywanie", "rec")
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
             img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy.", true)
@@ -61,7 +72,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
             img.list("stab_smooth", "SUPER: siła wygładzania", arrayOf("Słaba – szybko podąża za ruchem", "Średnia", "Mocna", "Bardzo mocna – „pływający” obraz"),
                 arrayOf("0.2", "0.35", "0.6", "1.0"), "0.35")
-            val cal = cat("SUPER – kalibracja (zaawansowane)")
+            val cal = cat("SUPER – kalibracja (zaawansowane)", "rec")
             cal.sw("stab_log", "Zapisuj dane kalibracji", "Plik z danymi żyroskopu obok każdego nagrania SUPER (Dokumenty/TrenerNaWodzie/Kalibracja). Włącz tylko do testów.", false)
             cal.edit("stab_t_ms", "Korekta czasu żyroskopu (ms)", "0", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – zostaw 0, chyba że kalibracja wskaże inną wartość." }
@@ -77,7 +88,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             img.action("Gdzie są nagrania?", "Galeria → Filmy / TrenerNaWodzie. Dźwięk jest dołączany po zatrzymaniu nagrania.") {}
         }
 
-        val talk = cat("Rozmowa i przyciski")
+        val talk = cat("Rozmowa i przyciski", "talk")
         talk.list("talk_mode", "Tryb rozmowy", arrayOf("Rozmowa ciągła", "Push-to-talk (naciśnij, aby mówić)"), arrayOf("open", "ptt"), "open")
         val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop")
                    else arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk")
@@ -87,7 +98,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         talk.list("vol_down", "Przycisk głośności −", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, if (coach) "record" else "volume")
         talk.action("Jak działają przyciski", "Działają też przy zgaszonym ekranie. Push-to-talk: przytrzymaj, aby mówić; w słuchawkach Bluetooth – kliknij, aby zacząć i kliknij ponownie, aby skończyć.") {}
 
-        val snd = cat("Dźwięk")
+        val snd = cat("Dźwięk", "snd")
         snd.list("mic_gain", "Wzmocnienie mikrofonu (Mic Gain)", arrayOf("0,5×", "0,75×", "1× (bez zmian)", "1,5×", "2×", "3×", "4× (może przesterowywać)"),
             arrayOf("0.5", "0.75", "1", "1.5", "2", "3", "4"), "1")
         snd.list("gain", "Głośność odbieranego głosu (wzmocnienie)", arrayOf("1× (bez wzmocnienia)", "2×", "3× (zalecane)", "4×", "6×", "8× (może przesterowywać)"), arrayOf("1", "2", "3", "4", "6", "8"), "3")
@@ -102,7 +113,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         }
 
         if (coach) {
-            val nt = cat("Notatki głosowe")
+            val nt = cat("Notatki głosowe", "snd")
             nt.sw("note_transcribe", "Zapisuj transkrypcję obok nagrania", "Plik .txt obok .m4a w Dokumenty/TrenerNaWodzie/Notatki.", true)
             nt.edit("openai_key", "Klucz OpenAI (opcjonalnie)", "").apply {
                 setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
@@ -112,7 +123,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             }
         }
 
-        val net = cat("Połączenie")
+        val net = cat("Połączenie", "net")
         if (coach) {
             net.list("kbps", "Jakość rozmowy (dla wszystkich)", arrayOf("Oszczędna – 16 kb/s (słaby zasięg)", "Standardowa – 32 kb/s", "Wysoka – 64 kb/s"), arrayOf("16", "32", "64"), "32")
         }
@@ -122,19 +133,19 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             net.edit("web_url", "Adres strony (do zaproszeń)", BuildConfig.WEB_URL)
         }
 
-        val notif = cat("Powiadomienia o dołączeniu i rozłączeniu")
+        val notif = cat("Powiadomienia o dołączeniu i rozłączeniu", "net")
         notif.sw("n_sound", "Sygnał dźwiękowy", null, true)
         notif.sw("n_text", "Komunikat na ekranie", null, true)
         notif.sw("n_voice", "Komunikat głosowy", "Np. „Ola – utracono połączenie”.", false)
 
-        val sb = cat("Czuwanie w tle (poza sesją)")
+        val sb = cat("Czuwanie w tle (poza sesją)", "net")
         sb.sw("standby_coach", "Powiadamiaj, gdy ktoś łączy się z moim pokojem",
             "Działa dla zapisanych pokoi, gdy nie prowadzisz sesji. Dotknięcie powiadomienia rozpoczyna sesję.", true)
         sb.sw("standby_ath", "Pozwól trenerowi do mnie dzwonić",
             "Trener może wywołać Cię z listy osób, które były w jego pokoju (tylko aplikacja Android).", true)
         sb.action("Czas czuwania", "Czuwanie wyłącza się samo 2 godziny po zakończeniu ostatniej sesji, żeby nie zużywać baterii. Wcześniej możesz je zatrzymać przez „Zamknij aplikację”.") {}
 
-        val appCat = cat("Aplikacja")
+        val appCat = cat("Aplikacja", "app")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
         appCat.action("Aktualizacja zachowuje dane", "Pokoje, ustawienia i nagrania zostają. Trwająca sesja wznawia się jednym dotknięciem po instalacji.") {}
@@ -145,6 +156,29 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             appCat.action("Zakończ sesję", "Rozłącza wszystkich i zatrzymuje nagrywanie") {
                 SessionService.endSession(requireContext()); activity?.finish()
             }
+        }
+        if (sec == null) {
+            // ekran główny: lista działów, każdy otwiera się osobno
+            for ((c, _) in cats) screen.removePreference(c)
+            val top = PreferenceCategory(ctx).apply { isIconSpaceReserved = false }.also { screen.addPreference(it) }
+            for ((id, t, sum) in SECTIONS) {
+                if (cats.none { it.second == id }) continue
+                top.addPreference(Preference(ctx).apply {
+                    title = t; summary = sum; isIconSpaceReserved = false
+                    setOnPreferenceClickListener {
+                        parentFragmentManager.beginTransaction()
+                            .replace(android.R.id.content, SettingsFragment().apply { arguments = Bundle().apply { putString("sec", id) } })
+                            .addToBackStack(null).commit()
+                        true
+                    }
+                })
+            }
+            if (Engine.role != Engine.Role.NONE) top.action("Zakończ sesję", "Rozłącza wszystkich i zatrzymuje nagrywanie") {
+                SessionService.endSession(requireContext()); activity?.finish()
+            }
+            top.action("Wersja ${BuildConfig.VERSION_NAME}", "Sprawdzanie aktualizacji – w dziale Aplikacja") {}
+        } else {
+            for ((c, id) in cats) if (id != sec) screen.removePreference(c)
         }
         refreshDynamic()
     }
@@ -179,6 +213,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
 
     override fun onResume() {
         super.onResume()
+        val sec = arguments?.getString("sec")
+        activity?.title = SECTIONS.firstOrNull { it.first == sec }?.second ?: "Ustawienia"
         preferenceManager.sharedPreferences?.registerOnSharedPreferenceChangeListener(this)
         Engine.addUi(ui)
     }

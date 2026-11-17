@@ -91,6 +91,21 @@ object Notifier {
         } catch (_: Exception) {}
     }
 
+    /** Start / stop nagrywania: dźwięk i wibracja (start – jeden dłuższy, stop – dwa krótkie). */
+    fun recCue(start: Boolean) = onMain {
+        try {
+            val g = tone ?: ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90).also { tone = it }
+            g.startTone(if (start) ToneGenerator.TONE_PROP_BEEP else ToneGenerator.TONE_PROP_BEEP2, if (start) 300 else 450)
+        } catch (_: Exception) {}
+        try {
+            val v: android.os.Vibrator? = if (android.os.Build.VERSION.SDK_INT >= 31)
+                app.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+            else @Suppress("DEPRECATION") app.getSystemService(android.os.Vibrator::class.java)
+            val p = if (start) longArrayOf(0, 250) else longArrayOf(0, 90, 120, 90)
+            v?.vibrate(android.os.VibrationEffect.createWaveform(p, -1))
+        } catch (_: Exception) {}
+    }
+
     fun say(text: String) = onMain {
         ensureTts()
         if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "n" + System.nanoTime())

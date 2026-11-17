@@ -91,9 +91,12 @@ object Prefs {
     // ---------- kamera ----------
     val aspect: String get() = sp.getString("aspect", "4:3") ?: "4:3"
     val watermark get() = sp.getBoolean("watermark", true)
+    /** Korekta jasności pamiętana osobno dla trybów SUPER (obiektyw szeroki jest ciemniejszy) i dla pozostałych. */
+    private val evSuper get() = stabMode == "super" || stabMode == "superh"
+    var evSuperDefault = 0   // ustawiane przez kamerę: ok. +0,7 EV
     var evIndex: Int
-        get() = sp.getInt("ev_index", 0)
-        set(v) = sp.edit().putInt("ev_index", v).apply()
+        get() = if (evSuper) sp.getInt("ev_index_super", evSuperDefault) else sp.getInt("ev_index", 0)
+        set(v) = sp.edit().putInt(if (evSuper) "ev_index_super" else "ev_index", v).apply()
 
     // ---------- głośności ustawione dla konkretnego zawodnika (1.0 = bez zmian) ----------
     fun athRecvVol(cid: String) = sp.getFloat("rv_$cid", 1f)
