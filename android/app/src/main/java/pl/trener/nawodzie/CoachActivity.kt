@@ -363,7 +363,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private fun stabMenu(anchor: View) {
         if (CamRec.recording != null) { Notifier.toast("Zatrzymaj nagrywanie, aby zmienić stabilizację"); return }
         val pm = PopupMenu(this, anchor)
-        val opts = listOf("off" to "Wyłączona", "std" to "Standardowa", "sport" to "Sport – duże kadrowanie")
+        val opts = listOf("off" to "Wyłączona", "std" to "Standardowa", "sport" to "Sport – wygładzanie drgań",
+            "horizon" to "Horyzont – poziom i wysokość", "horizon2" to "Horyzont płynny (nagranie +0,3 s)")
         opts.forEachIndexed { i, (_, label) -> pm.menu.add(0, i, i, label).isCheckable = true }
         pm.menu.setGroupCheckable(0, true, true)
         pm.menu.getItem(opts.indexOfFirst { it.first == Prefs.stabMode }.coerceAtLeast(0)).isChecked = true
@@ -375,6 +376,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 Notifier.toast(when {
                     m == "off" -> "Stabilizacja wyłączona"
                     m == "sport" -> "Tryb Sport: obraz przycięty, mocna korekta wahań"
+                    m == "horizon" -> "Tryb Horyzont: poziom i wysokość horyzontu trzymane stale"
+                    m == "horizon2" -> "Tryb Horyzont płynny: nagranie z wyprzedzeniem 0,3 s"
                     CamRec.stabSupported -> "Stabilizacja standardowa włączona"
                     else -> "Ten telefon nie udostępnia standardowej stabilizacji – spróbuj trybu Sport"
                 }); refresh()
@@ -414,8 +417,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         evBox.visibility = if (CamRec.camera == null || CamRec.evSupported()) View.VISIBLE else View.GONE
         qualityPill.text = when (Prefs.quality) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
         val sm = Prefs.stabMode
-        stabPill.text = when (sm) { "sport" -> "SPORT"; "std" -> "STAB"; else -> "OFF" }
-        val stabOn = sm == "sport" || (sm == "std" && (CamRec.camera == null || CamRec.stabSupported))
+        stabPill.text = when (sm) { "sport" -> "SPORT"; "std" -> "STAB"; "horizon" -> "HOR"; "horizon2" -> "HOR+"; else -> "OFF" }
+        val stabOn = sm == "sport" || sm == "horizon" || sm == "horizon2" || (sm == "std" && (CamRec.camera == null || CamRec.stabSupported))
         stabPill.setTextColor(if (stabOn) ACCENT else Color.WHITE)
         stabPill.compoundDrawablesRelative[0]?.mutate()?.setTint(if (stabOn) ACCENT else Color.WHITE)
         noiseBtn.state(Prefs.coachNoise)
