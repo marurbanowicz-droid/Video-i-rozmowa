@@ -30,10 +30,10 @@ object Muxer {
     private class Out(val uri: Uri?, val pfd: ParcelFileDescriptor, val file: File?)
 
     /** Nazwa pliku według chwili rozpoczęcia nagrania (a nie chwili zapisu). */
-    private fun fileName(takenMs: Long) = "trening_" + SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(takenMs)) + ".mp4"
+    private fun fileName(takenMs: Long, suffix: String) = "trening_" + SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(takenMs)) + suffix + ".mp4"
 
-    private fun openOut(ctx: Context, takenMs: Long): Out {
-        val name = fileName(takenMs)
+    private fun openOut(ctx: Context, takenMs: Long, suffix: String): Out {
+        val name = fileName(takenMs, suffix)
         return if (Build.VERSION.SDK_INT >= 29) {
             val cv = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, name)
@@ -81,15 +81,15 @@ object Muxer {
         } catch (_: Throwable) { false } finally { try { ex.release() } catch (_: Throwable) {} }
     }
 
-    fun saveVideoOnly(ctx: Context, video: File, takenMs: Long): Uri? {
-        val o = openOut(ctx, takenMs)
+    fun saveVideoOnly(ctx: Context, video: File, takenMs: Long, suffix: String = ""): Uri? {
+        val o = openOut(ctx, takenMs, suffix)
         try {
             FileInputStream(video).use { inp -> ParcelFileDescriptor.AutoCloseOutputStream(ParcelFileDescriptor.dup(o.pfd.fileDescriptor)).use { inp.copyTo(it, 1 shl 16) } }
             return publish(ctx, o)
         } catch (e: Throwable) { discard(ctx, o); throw e }
     }
 
-    fun mux(ctx: Context, video: File, pcm: File, sampleRate: Int, channels: Int, offsetMs: Long, takenMs: Long): Uri? {
+    fun mux(ctx: Context, video: File, pcm: File, sampleRate: Int, channels: Int, offsetMs: Long, takenMs: Long, suffix: String = ""): Uri? {
         val ex = MediaExtractor()
         val aacFile = File(video.parentFile, video.nameWithoutExtension + ".aac.tmp")
         var reader: AacReader? = null
@@ -112,7 +112,7 @@ object Muxer {
             val aFmt = if (pcm.exists() && pcm.length() > 0 && sampleRate > 0)
                 encodeAac(pcm, sampleRate, channels, t0 + offsetMs * 1000, t0 + durUs, aacFile) else null
 
-            val o = openOut(ctx, takenMs); out = o
+            val o = openOut(ctx, takenMs, suffix); out = o
             val m = MediaMuxer(o.pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4); muxer = m
             if (vFmt.containsKey(MediaFormat.KEY_ROTATION)) m.setOrientationHint(vFmt.getInteger(MediaFormat.KEY_ROTATION))
             val mv = m.addTrack(vFmt)

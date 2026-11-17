@@ -52,6 +52,9 @@ object Prefs {
     val sportInvH get() = sp.getBoolean("sport_inv_h", false)
     val sportInvV get() = sp.getBoolean("sport_inv_v", false)
     val sportInvRoll get() = sp.getBoolean("sport_inv_roll", false)
+    /** Tryby Horyzont: przesunięcie czasu żyroskopu względem klatek (ms) i odwrócenie kierunku korekty. */
+    val stabOffsetMs: Long get() = (sp.getString("stab_offset", "10") ?: "10").trim().toLongOrNull()?.coerceIn(-200, 200) ?: 10L
+    val stabInvert get() = sp.getBoolean("stab_invert", false)
     /** open (rozmowa ciągła) | ptt (naciśnij, aby mówić) */
     val talkMode: String get() = sp.getString("talk_mode", "open") ?: "open"
     val headsetAction: String get() = sp.getString("headset_action", "mute_all") ?: "mute_all"

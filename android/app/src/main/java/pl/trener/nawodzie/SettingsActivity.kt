@@ -54,11 +54,16 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             val img = cat("Obraz i nagrywanie")
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
-            img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy. W trybie Sport niedostępny.", true)
+            img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
-                arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – duże kadrowanie (motorówka)"), arrayOf("off", "std", "sport"), Prefs.stabMode)
+                arrayOf("Wyłączona", "Standardowa (systemowa)", "Sport – wygładzanie drgań", "Horyzont – poziom i wysokość horyzontu", "Horyzont płynny – z wyprzedzeniem (nagranie +0,3 s)"),
+                arrayOf("off", "std", "sport", "horizon", "horizon2"), Prefs.stabMode)
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
-            img.list("sport_crop", "Tryb Sport: siła kadrowania", arrayOf("Średnia (kadr 70%)", "Duża (kadr 62%)", "Bardzo duża (kadr 55%)"), arrayOf("1.4", "1.6", "1.8"), "1.6")
+            img.edit("stab_offset", "Sport/Horyzont: korekta czasu żyroskopu (ms)", "10", numeric = true).apply {
+                summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "10"} ms – zmieniaj po 10 ms, jeśli korekta wyraźnie spóźnia się (więcej) albo wyprzedza ruch (mniej)." }
+            }
+            img.sw("stab_invert", "Horyzont: odwróć kierunek korekty", "Tylko jeśli obraz w trybie Horyzont wyraźnie wzmacnia kołysanie zamiast je tłumić.", false)
+            img.list("sport_crop", "Sport/Horyzont: siła kadrowania", arrayOf("Średnia (kadr 70%)", "Duża (kadr 62%)", "Bardzo duża (kadr 55%)"), arrayOf("1.4", "1.6", "1.8"), "1.6")
             img.sw("sport_inv_h", "Tryb Sport: odwróć korektę w poziomie", "Włącz, jeśli obraz „ucieka” w złą stronę przy obrocie w bok.", false)
             img.sw("sport_inv_v", "Tryb Sport: odwróć korektę w pionie", "Włącz, jeśli obraz „ucieka” w złą stronę przy kiwaniu w górę/dół.", false)
             img.sw("sport_inv_roll", "Tryb Sport: odwróć korektę przechyłu", null, false)
@@ -149,7 +154,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         dataPref?.summary = if (Engine.role == Engine.Role.NONE) "Brak aktywnej sesji"
             else "Wysłane ${fmtBytes(Engine.bytesSent)} · odebrane ${fmtBytes(Engine.bytesRecv)} · razem ${fmtBytes(tot)} (${fmtBytes((tot / mins).toLong())}/min)"
         stabPref?.summary = when (Prefs.stabMode) {
-            "sport" -> "Sport: aplikacja kadruje obraz i koryguje go żyroskopem – wytrzymuje duże wahania (np. na motorówce)."
+            "sport" -> "Sport: aplikacja kadruje obraz i wygładza drgania żyroskopem."
+            "horizon" -> "Horyzont: przechył wyrównany do poziomu, horyzont na stałej wysokości, wygładzone panoramowanie."
+            "horizon2" -> "Horyzont płynny: jak Horyzont, ale nagranie liczone z wyprzedzeniem 0,3 s – płynniejsze ruchy. Podgląd bez opóźnienia."
             "std" -> if (CamRec.camera != null && !CamRec.stabSupported) "Standardowa – ten telefon nie udostępnia jej aplikacjom; użyj trybu Sport." else "Standardowa: systemowa stabilizacja aparatu."
             else -> "Wyłączona"
         }
@@ -173,7 +180,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "vol_up", "vol_down" -> Controls.applyVolumeMode()
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "sport_crop", "aspect", "watermark" -> {
+            "quality", "stab_mode", "sport_crop", "aspect", "watermark", "stab_offset", "stab_invert" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }

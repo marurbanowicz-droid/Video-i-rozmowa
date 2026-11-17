@@ -62,7 +62,12 @@ object CamRec {
 
     private var pendingRebind = false
     private var lastZoomKey = ""
-    private var sport: SportEffect? = null
+    private var stabFx: List<StabEffect> = emptyList()
+    /** Orientacja ekranu (podgląd) i orientacja nagrania (zamrożona na czas nagrywania) – dla trybów Horyzont. */
+    @Volatile var uiRotation = Surface.ROTATION_0; private set
+    @Volatile var videoRotation = Surface.ROTATION_0; private set
+    /** Opóźnienie obrazu w nagraniu (Horyzont płynny) – ustawiane przez efekt stabilizacji. */
+    @Volatile var videoDelayMs = 0
     private var overlay: OverlayEffect? = null
     private val overlayThread by lazy { android.os.HandlerThread("watermark").apply { start() } }
     private val stampFmt = java.text.SimpleDateFormat("yyyy-MM-dd  HH:mm:ss", java.util.Locale.US)
@@ -75,7 +80,9 @@ object CamRec {
     private var appCtx: Context? = null
     /** Aktualny zoom (czytany przez tryb Sport z innego wątku). */
     @Volatile var curZoom = 1f; private set
-    val sportActive get() = sport != null
+    val sportActive get() = stabFx.isNotEmpty()
+    private fun releaseStab() { stabFx.forEach { it.processor.release() }; stabFx = emptyList() }
+    private fun modeSuffix(m: String) = when (m) { "sport" -> "_SPORT"; "horizon" -> "_HOR"; "horizon2" -> "_HORP"; else -> "" }
     /** Nazwy (bez rozszerzenia) plików roboczych, które są właśnie nagrywane lub zapisywane. */
     private val inUse: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
@@ -91,7 +98,7 @@ object CamRec {
     fun unbind() {
         try { recording?.stop() } catch (_: Exception) {}
         provider?.unbindAll()
-        sport?.processor?.release(); sport = null
+        releaseStab()
         try { overlay?.close() } catch (_: Exception) {}; overlay = null
         camera = null; preview = null; videoCapture = null; owner = null
         notifyChange()
@@ -104,7 +111,7 @@ object CamRec {
         val o = owner ?: return@onMain
         try {
             p.unbindAll()
-            sport?.processor?.release(); sport = null
+            releaseStab()
             try { overlay?.close() } catch (_: Exception) {}; overlay = null
             val wide = Prefs.aspect == "16:9"
             val sel = CameraSelector.DEFAULT_BACK_CAMERA
@@ -129,8 +136,9 @@ object CamRec {
             if (want && prevStabOk) pb.setPreviewStabilizationEnabled(true)
             val vb = VideoCapture.Builder(recorder).setTargetRotation(rotation)
             if (want && !prevStabOk && vidStabOk) vb.setVideoStabilizationEnabled(true)
-            if (mode == "sport") {
-                // Tryb Sport sam koryguje ruch na podstawie żyroskopu. Optyczna stabilizacja obiektywu musi być wtedy
+            val glMode = mode == "sport" || mode == "horizon" || mode == "horizon2"
+            if (glMode) {
+                // Tryby Sport/Horyzont same korygują ruch na podstawie żyroskopu. Optyczna stabilizacja obiektywu musi być wtedy
                 // wyłączona – inaczej drobne drgania byłyby korygowane dwa razy (raz przez obiektyw, raz przez aplikację).
                 try {
                     Camera2Interop.Extender(pb).setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
@@ -142,17 +150,31 @@ object CamRec {
             val vc = vb.build()
             stabSupported = prevStabOk || vidStabOk
             stabActive = want && stabSupported
-            camera = if (mode == "sport") {
+            camera = if (glMode) {
+                val ctx = appCtx ?: (o as Context)
+                val sr = info?.sensorRotationDegrees ?: 90
                 try {
-                    val eff = SportEffect.create(appCtx ?: (o as Context), info?.sensorRotationDegrees ?: 90)
-                    val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(eff).build()
-                    p.bindToLifecycle(o, sel, group).also { sport = eff }
+                    // osobne efekty dla podglądu i nagrania: nagranie może być opóźnione (Horyzont płynny), podgląd nie
+                    val pe = StabEffect(CameraEffect.PREVIEW, StabProcessor(ctx, mode, sr, CameraEffect.PREVIEW))
+                    val ve = StabEffect(CameraEffect.VIDEO_CAPTURE, StabProcessor(ctx, mode, sr, CameraEffect.VIDEO_CAPTURE))
+                    stabFx = listOf(pe, ve)
+                    val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(pe).addEffect(ve).build()
+                    p.bindToLifecycle(o, sel, group)
                 } catch (e: Exception) {
-                    Log.e(TAG, "sport", e)
-                    sport?.processor?.release(); sport = null
-                    Notifier.toast("Tryb Sport niedostępny na tym telefonie – używam zwykłego obrazu")
-                    p.unbindAll()
-                    p.bindToLifecycle(o, sel, pv, vc)
+                    Log.w(TAG, "stab x2", e)
+                    releaseStab(); p.unbindAll()
+                    try {
+                        val both = CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE
+                        val eff = StabEffect(both, StabProcessor(ctx, mode, sr, both))
+                        stabFx = listOf(eff)
+                        val group = UseCaseGroup.Builder().addUseCase(pv).addUseCase(vc).addEffect(eff).build()
+                        p.bindToLifecycle(o, sel, group)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "stab", e2)
+                        releaseStab(); p.unbindAll()
+                        Notifier.toast("Ten tryb stabilizacji jest niedostępny na tym telefonie – używam zwykłego obrazu")
+                        p.bindToLifecycle(o, sel, pv, vc)
+                    }
                 }
             } else if (Prefs.watermark) {
                 try {
@@ -239,6 +261,8 @@ object CamRec {
     /** Orientacja telefonu. W trakcie nagrywania film zachowuje orientację z chwili startu; nowa wejdzie przy następnym nagraniu. */
     fun setRotation(r: Int) = onMain {
         rotation = r
+        uiRotation = r
+        if (recording == null) videoRotation = r
         preview?.targetRotation = r
         if (recording == null) videoCapture?.targetRotation = r
     }
@@ -270,6 +294,9 @@ object CamRec {
         val base = "rec_$started"
         val vFile = File(dir, "$base.mp4")
         val pw = PcmWriter(File(dir, "$base.pcm"), File(dir, "$base.meta"))
+        videoRotation = rotation
+        // tryb stabilizacji i opóźnienie obrazu (Horyzont płynny) – potrzebne przy zapisie, także po odzyskaniu nagrania
+        try { File(dir, "$base.info").writeText("${modeSuffix(Prefs.stabMode)};$videoDelayMs") } catch (_: Exception) {}
         val sink: (ByteArray, Int, Int) -> Unit = { data, sr, ch -> pw.write(data, sr, ch) }
         inUse.add(base)
         try {
@@ -281,6 +308,7 @@ object CamRec {
                             if (Engine.pcmSink === sink) Engine.pcmSink = null
                             pw.close()
                             recording = null
+                            videoRotation = rotation
                             // orientacja mogła się zmienić w trakcie nagrania – następne nagranie ma mieć aktualną
                             try { videoCapture?.targetRotation = rotation } catch (_: Exception) {}
                             if (pendingRebind) { pendingRebind = false; rebind() }
@@ -306,10 +334,16 @@ object CamRec {
         return true
     }
 
-    fun stopRec() { try { recording?.stop() } catch (_: Exception) {} }
+    /** W trybie Horyzont płynny obraz w nagraniu jest opóźniony – zatrzymujemy chwilę później, żeby nic nie uciąć. */
+    fun stopRec() {
+        val r = recording ?: return
+        val d = videoDelayMs
+        if (d > 0) mainHandler.postDelayed({ try { r.stop() } catch (_: Exception) {} }, d + 150L)
+        else try { r.stop() } catch (_: Exception) {}
+    }
 
     private fun cleanup(dir: File, base: String) {
-        for (ext in listOf("mp4", "pcm", "meta", "aac.tmp")) try { File(dir, "$base.$ext").delete() } catch (_: Exception) {}
+        for (ext in listOf("mp4", "pcm", "meta", "info", "aac.tmp")) try { File(dir, "$base.$ext").delete() } catch (_: Exception) {}
     }
 
     /** Zapis nagrania w Galerii: wideo + dźwięk. Pliki robocze znikają dopiero po udanym zapisie. Wywoływać z wątku w tle. */
@@ -317,12 +351,15 @@ object CamRec {
         val vFile = File(dir, "$base.mp4"); val pcm = File(dir, "$base.pcm"); val meta = File(dir, "$base.meta")
         var sr = 0; var ch = 1
         try { meta.readText().trim().split(",").let { sr = it[0].toInt(); ch = it[1].toInt() } } catch (_: Exception) {}
+        var suffix = ""; var delayMs = 0L
+        try { File(dir, "$base.info").readText().trim().split(";").let { suffix = it[0]; delayMs = it.getOrNull(1)?.toLongOrNull() ?: 0L } } catch (_: Exception) {}
         var audioMissing = false
         val uri: Uri? = try {
-            Muxer.mux(app, vFile, pcm, sr, ch, Prefs.audioOffsetMs, started)
+            // obraz opóźniony o delayMs – dźwięk przesuwamy o tyle samo
+            Muxer.mux(app, vFile, pcm, sr, ch, Prefs.audioOffsetMs + delayMs, started, suffix)
         } catch (e: Throwable) {
             Log.e(TAG, "mux", e)
-            try { Muxer.saveVideoOnly(app, vFile, started).also { audioMissing = true } } catch (e2: Throwable) { Log.e(TAG, "copy", e2); null }
+            try { Muxer.saveVideoOnly(app, vFile, started, suffix).also { audioMissing = true } } catch (e2: Throwable) { Log.e(TAG, "copy", e2); null }
         }
         when {
             uri != null -> {
