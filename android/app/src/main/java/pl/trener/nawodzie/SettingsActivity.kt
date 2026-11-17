@@ -66,6 +66,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             cal.edit("stab_t_ms", "Korekta czasu żyroskopu (ms)", "0", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – zostaw 0, chyba że kalibracja wskaże inną wartość." }
             }
+            cal.sw("stab_invert", "Odwróć kierunek korekty", "Tylko jeśli w trybie SUPER drgania na podglądzie są wyraźnie większe niż w trybie OIS.", false)
             cal.list("stab_rs", "Korekta odczytu matrycy („galaretka”)", arrayOf("Włączona (od góry kadru)", "Włączona (odwrócona)", "Wyłączona"), arrayOf("1", "-1", "0"), "1")
             cal.edit("stab_fscale", "Korekta ogniskowej (proc.)", "100", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "100"} – zostaw 100, chyba że kalibracja wskaże inną wartość." }
@@ -197,7 +198,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "rec_raw" -> Notifier.toast("Zmiana zadziała od następnej sesji")
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "aspect", "watermark", "stab_smooth", "stab_t_ms", "stab_rs", "stab_fscale" -> {
+            "quality", "stab_mode", "aspect", "watermark", "stab_smooth", "stab_t_ms", "stab_rs", "stab_fscale", "stab_invert" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }

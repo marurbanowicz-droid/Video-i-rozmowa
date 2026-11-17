@@ -443,6 +443,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
     private val offsetNs = Prefs.stabTimeMs * 1_000_000L
     private val rsDir = Prefs.stabRs
+    private val invert = Prefs.stabInvert
     private val watermark = Prefs.watermark
 
     // ---- GL ----
@@ -622,7 +623,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
 
     /** Punkt kadru wirtualnej kamery → punkt obrazu z matrycy (0…1, t w górę) dla orientacji telefonu [a]. */
     private fun hom(a: DoubleArray, v: DoubleArray, f: Double, k: Double): DoubleArray {
-        val rc = mMul(mMul(B, mMul(mT(a), v)), BT)
+        val rc = mMul(mMul(B, if (invert) mMul(mT(v), a) else mMul(mT(a), v)), BT)
         val w = inW.toDouble(); val h = inH.toDouble()
         val mv = doubleArrayOf(w / k, 0.0, -0.5 * w / k, 0.0, -h / k, 0.5 * h / k, 0.0, 0.0, f)
         val p = doubleArrayOf(f / w, 0.0, 0.5, 0.0, -f / h, 0.5, 0.0, 0.0, 1.0)
