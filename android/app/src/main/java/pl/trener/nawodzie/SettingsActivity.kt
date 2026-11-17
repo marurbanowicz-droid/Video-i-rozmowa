@@ -56,9 +56,20 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
             img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
-                arrayOf("Optyczna (obiektyw)", "Optyczna + poziom horyzontu"), arrayOf("off", "level"), Prefs.stabMode)
+                arrayOf("OIS – optyczna (obiektyw)", "EIS – elektroniczna systemowa", "SUPER – jak Super Steady", "SUPER+H – Super + poziomy horyzont"),
+                arrayOf("off", "eis", "super", "superh"), Prefs.stabMode)
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
-            img.sw("stab_invert", "Poziom horyzontu: odwróć kierunek korekty", "Tylko jeśli przechył na nagraniu jest dwa razy większy zamiast zniknąć.", false)
+            img.list("stab_smooth", "SUPER: siła wygładzania", arrayOf("Słaba – szybko podąża za ruchem", "Średnia", "Mocna", "Bardzo mocna – „pływający” obraz"),
+                arrayOf("0.2", "0.35", "0.6", "1.0"), "0.35")
+            val cal = cat("SUPER – kalibracja (zaawansowane)")
+            cal.sw("stab_log", "Zapisuj dane kalibracji", "Plik z danymi żyroskopu obok każdego nagrania SUPER (Dokumenty/TrenerNaWodzie/Kalibracja). Włącz tylko do testów.", false)
+            cal.edit("stab_t_ms", "Korekta czasu żyroskopu (ms)", "0", numeric = true).apply {
+                summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – zostaw 0, chyba że kalibracja wskaże inną wartość." }
+            }
+            cal.list("stab_rs", "Korekta odczytu matrycy („galaretka”)", arrayOf("Włączona (od góry kadru)", "Włączona (odwrócona)", "Wyłączona"), arrayOf("1", "-1", "0"), "1")
+            cal.edit("stab_fscale", "Korekta ogniskowej (proc.)", "100", numeric = true).apply {
+                summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "100"} – zostaw 100, chyba że kalibracja wskaże inną wartość." }
+            }
             img.edit("audio_offset", "Korekta synchronizacji dźwięku (ms)", "0", numeric = true).apply {
                 summaryProvider = Preference.SummaryProvider<EditTextPreference> { p -> "${p.text ?: "0"} ms – dodatnia: dźwięk później, ujemna: wcześniej. Sprawdź klaśnięciem w kadrze." }
             }
@@ -157,8 +168,12 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val mins = if (Engine.sessionStart > 0) maxOf(1.0, (System.currentTimeMillis() - Engine.sessionStart) / 60000.0) else 1.0
         dataPref?.summary = if (Engine.role == Engine.Role.NONE) "Brak aktywnej sesji"
             else "Wysłane ${fmtBytes(Engine.bytesSent)} · odebrane ${fmtBytes(Engine.bytesRecv)} · razem ${fmtBytes(tot)} (${fmtBytes((tot / mins).toLong())}/min)"
-        stabPref?.summary = if (Prefs.stabMode == "level") "Drgania tłumi obiektyw, a aplikacja powoli prostuje przechył horyzontu (kadr przycięty o ok. 20 proc.)."
-            else "Drgania tłumi stabilizacja optyczna obiektywu, bez przycinania kadru." 
+        stabPref?.summary = when (Prefs.stabMode) {
+            "eis" -> "Elektroniczna stabilizacja systemu telefonu (jeśli ją udostępnia) razem z optyczną."
+            "super" -> "Obiektyw szeroki z dużym zapasem kadru, korekta z żyroskopu i wyprzedzeniem 0,5 s. Zoom ograniczony."
+            "superh" -> "Jak SUPER, a horyzont zawsze poziomo."
+            else -> "Drgania tłumi stabilizacja optyczna obiektywu, bez przycinania kadru."
+        }
     }
 
     override fun onResume() {
@@ -182,7 +197,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             "rec_raw" -> Notifier.toast("Zmiana zadziała od następnej sesji")
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
-            "quality", "stab_mode", "sport_crop", "aspect", "watermark", "stab_offset", "stab_invert" -> {
+            "quality", "stab_mode", "aspect", "watermark", "stab_smooth", "stab_t_ms", "stab_rs", "stab_fscale" -> {
                 if (CamRec.recording != null) Notifier.toast("Zmiana zadziała po zakończeniu nagrania")
                 else CamRec.rebind()
             }

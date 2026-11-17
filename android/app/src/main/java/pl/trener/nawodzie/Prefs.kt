@@ -47,8 +47,15 @@ object Prefs {
     val crosstalk get() = sp.getBoolean("crosstalk", true)
     val quality: String get() = sp.getString("quality", "FHD") ?: "FHD"
     /** off | std (systemowa) | sport (duże kadrowanie + żyroskop) */
-    /** off – tylko optyczna stabilizacja obiektywu (OIS); level – OIS + powolne poziomowanie horyzontu. Stare tryby → off. */
-    val stabMode: String get() = if (sp.getString("stab_mode", "off") == "level") "level" else "off"
+    /** off – optyczna (OIS); eis – systemowa elektroniczna; super – jak Super Steady; superh – super + poziomy horyzont. */
+    val stabMode: String get() = (sp.getString("stab_mode", "off") ?: "off").let { if (it in setOf("off", "eis", "super", "superh")) it else "off" }
+    /** Siła wygładzania toru kamery (sigma w sekundach). */
+    val stabSmooth: Double get() = (sp.getString("stab_smooth", "0.35") ?: "0.35").toDoubleOrNull()?.coerceIn(0.1, 1.5) ?: 0.35
+    val stabTimeMs: Long get() = (sp.getString("stab_t_ms", "0") ?: "0").trim().toLongOrNull()?.coerceIn(-150, 150) ?: 0L
+    /** Kierunek odczytu matrycy: 1 – od góry obrazu, -1 – od dołu, 0 – bez korekty „galaretki”. */
+    val stabRs: Int get() = (sp.getString("stab_rs", "1") ?: "1").toIntOrNull()?.coerceIn(-1, 1) ?: 1
+    val stabFScale: Double get() = ((sp.getString("stab_fscale", "100") ?: "100").trim().toDoubleOrNull() ?: 100.0).coerceIn(50.0, 200.0) / 100.0
+    val stabLog get() = sp.getBoolean("stab_log", false)
     val sportCrop: Float get() = (sp.getString("sport_crop", "1.6") ?: "1.6").toFloatOrNull() ?: 1.6f
     val sportInvH get() = sp.getBoolean("sport_inv_h", false)
     val sportInvV get() = sp.getBoolean("sport_inv_v", false)
