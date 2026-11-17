@@ -75,9 +75,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
 
         val talk = cat("Rozmowa i przyciski")
         talk.list("talk_mode", "Tryb rozmowy", arrayOf("Rozmowa ciągła", "Push-to-talk (naciśnij, aby mówić)"), arrayOf("open", "ptt"), "open")
-        val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop")
+        val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop")
                    else arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk")
-        val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record") else arrayOf("mute_all", "mute_mic", "ptt")
+        val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record", "note") else arrayOf("mute_all", "mute_mic", "ptt")
         talk.list("headset_action", "Środkowy przycisk słuchawek", acts, actVals, "mute_all")
         talk.list("vol_up", "Przycisk głośności +", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, "mute_all")
         talk.list("vol_down", "Przycisk głośności −", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, if (coach) "record" else "volume")
@@ -94,6 +94,17 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         } else {
             snd.sw("ath_noise", "Redukcja szumów", null, true)
             snd.sw("ath_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru.", true)
+        }
+
+        if (coach) {
+            val nt = cat("Notatki głosowe")
+            nt.sw("note_transcribe", "Zapisuj transkrypcję obok nagrania", "Plik .txt obok .m4a w Dokumenty/TrenerNaWodzie/Notatki.", true)
+            nt.edit("openai_key", "Klucz OpenAI (opcjonalnie)", "").apply {
+                setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+                summaryProvider = Preference.SummaryProvider<EditTextPreference> { p ->
+                    if (p.text.isNullOrBlank()) "Brak – transkrypcja w telefonie (Android 13+). Z kluczem: dokładniejszy model Whisper, wymaga internetu." else "Ustawiony – transkrypcję robi Whisper."
+                }
+            }
         }
 
         val net = cat("Połączenie")
@@ -177,7 +188,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         key ?: return
         when (key) {
-            "vol_up", "vol_down" -> Controls.applyVolumeMode()
+            "vol_up", "vol_down" -> { Controls.applyVolumeMode(); Engine.reportSettings() }
+            "headset_action" -> Engine.reportSettings()
+            "note_transcribe", "openai_key" -> {}
             "standby_coach", "standby_ath" -> StandbyService.ensure(requireContext())
             "sport_inv_h", "sport_inv_v", "sport_inv_roll" -> {}
             "quality", "stab_mode", "sport_crop", "aspect", "watermark", "stab_offset", "stab_invert" -> {

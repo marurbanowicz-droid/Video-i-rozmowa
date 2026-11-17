@@ -68,6 +68,9 @@ object Prefs {
     val turnUrl: String get() = (sp.getString("turn_url", "") ?: "").trim()
     val webUrl: String get() = (sp.getString("web_url", BuildConfig.WEB_URL) ?: BuildConfig.WEB_URL).trim().ifEmpty { BuildConfig.WEB_URL }
     val audioOffsetMs: Long get() = (sp.getString("audio_offset", "0") ?: "0").trim().toLongOrNull() ?: 0L
+    /** Notatki głosowe: transkrypcja i opcjonalny klucz OpenAI (Whisper). */
+    val noteTranscribe get() = sp.getBoolean("note_transcribe", true)
+    val openaiKey: String get() = (sp.getString("openai_key", "") ?: "").trim()
     val nSound get() = sp.getBoolean("n_sound", true)
     val nText get() = sp.getBoolean("n_text", true)
     val nVoice get() = sp.getBoolean("n_voice", false)
@@ -159,8 +162,8 @@ object Prefs {
     fun setCurrentRoom(code: String) = sp.edit().putString("current_room", code).apply()
 
     // ---------- sesja (do wznowienia po zamknięciu / aktualizacji) ----------
-    fun saveSession(role: String, room: String = "", name: String = "") {
-        sp.edit().putString("session", JSONObject().put("role", role).put("room", room).put("name", name)
+    fun saveSession(role: String, room: String = "", name: String = "", asCoach: Boolean = false) {
+        sp.edit().putString("session", JSONObject().put("role", role).put("room", room).put("name", name).put("asCoach", asCoach)
             .put("ts", System.currentTimeMillis()).toString()).apply()
     }
     fun touchSession() {
