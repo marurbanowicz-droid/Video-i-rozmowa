@@ -384,13 +384,14 @@ void main() {
 uniform mat4 uPost;
 uniform mat3 uH[9];
 uniform float uRs;
+uniform vec3 uRv;
 varying vec2 vC;
 vec2 pr(mat3 h, vec3 c) { vec3 v = h * c; return v.xy / v.z; }
 void main() {
     vec3 c = vec3(vC, 1.0);
     vec2 q = pr(uH[4], c);
     if (uRs != 0.0) {
-        float fr = uRs > 0.0 ? 1.0 - q.y : q.y;
+        float fr = dot(vec3(q, 1.0), uRv);
         float x = clamp(fr, 0.0, 1.0) * 8.0;
         vec2 r = q;
         for (int k = 0; k < 8; k++) {
@@ -438,8 +439,14 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val horizon = mode == "superh"
     private val videoOnly = targets == CameraEffect.VIDEO_CAPTURE
     private val wantDelay = videoOnly
-    private val B = deviceToBuf(sensorRotation)
-    private val BT = mT(B)
+    private val sensorRot = sensorRotation
+    // Układ obrazu wejściowego. Macierz SurfaceTexture może już zawierać obrót matrycy (wtedy obraz jest „pionowy”
+    // jak telefon w pozycji naturalnej) – wykrywamy to z macierzy przy pierwszej klatce.
+    private var swap = false
+    private var geoInit = false
+    private var B = deviceToBuf(sensorRotation)
+    private var BT = mT(B)
+    private var imgW = 1440; private var imgH = 1080
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
     private val offsetNs = Prefs.stabTimeMs * 1_000_000L
     private val rsDir = Prefs.stabRs
@@ -447,7 +454,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val watermark = Prefs.watermark
 
     // ---- GL ----
-    private class Prog(val id: Int, val aPos: Int, val aTex: Int, val uPre: Int, val uH: Int, val uPost: Int, val uRs: Int)
+    private class Prog(val id: Int, val aPos: Int, val aTex: Int, val uPre: Int, val uH: Int, val uPost: Int, val uRs: Int, val uRv: Int)
     private var dpy: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var ctxEgl: EGLContext = EGL14.EGL_NO_CONTEXT
     private var cfg: EGLConfig? = null
@@ -538,7 +545,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val p = link(compile(GLES20.GL_VERTEX_SHADER, VS), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         return Prog(p, GLES20.glGetAttribLocation(p, "aPosition"), GLES20.glGetAttribLocation(p, "aTexCoord"),
             GLES20.glGetUniformLocation(p, "uPre"), GLES20.glGetUniformLocation(p, "uH"),
-            GLES20.glGetUniformLocation(p, "uPost"), GLES20.glGetUniformLocation(p, "uRs"))
+            GLES20.glGetUniformLocation(p, "uPost"), GLES20.glGetUniformLocation(p, "uRs"), GLES20.glGetUniformLocation(p, "uRv"))
     }
 
     private fun compile(type: Int, src: String): Int {
@@ -624,7 +631,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     /** Punkt kadru wirtualnej kamery → punkt obrazu z matrycy (0…1, t w górę) dla orientacji telefonu [a]. */
     private fun hom(a: DoubleArray, v: DoubleArray, f: Double, k: Double): DoubleArray {
         val rc = mMul(mMul(B, if (invert) mMul(mT(v), a) else mMul(mT(a), v)), BT)
-        val w = inW.toDouble(); val h = inH.toDouble()
+        val w = imgW.toDouble(); val h = imgH.toDouble()
         val mv = doubleArrayOf(w / k, 0.0, -0.5 * w / k, 0.0, -h / k, 0.5 * h / k, 0.0, 0.0, f)
         val p = doubleArrayOf(f / w, 0.0, 0.5, 0.0, -f / h, 0.5, 0.0, 0.0, 1.0)
         return mMul(mMul(p, rc), mv)
@@ -753,6 +760,12 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         try { tex.updateTexImage() } catch (e: Exception) { return }
         tex.getTransformMatrix(stM)
         Matrix.invertM(stInv, 0, stM, 0)
+        val sw = abs(stM[1]) > abs(stM[0])
+        if (!geoInit || sw != swap) {
+            swap = sw; geoInit = true
+            B = deviceToBuf(if (sw) 0 else sensorRot); BT = mT(B)
+        }
+        imgW = if (swap) inH else inW; imgH = if (swap) inW else inH
         val ts = tex.timestamp
         val tC = sensorTime(ts) + offsetNs
         val dt = if (lastTc == 0L) 1.0 / 30 else ((tC - lastTc) / 1e9).coerceIn(0.001, 0.1)
@@ -797,7 +810,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         if (!StabLog.active) return
         if (logSession != StabLog.session) {
             logSession = StabLog.session
-            StabLog.line("# stream=${inW}x$inH rotation=${rotationFor()} lookahead_ms=${lookNs / 1_000_000} fMain=$fMain lensR=$lensR czMin=$czMin smooth_s=$sigma time_offset_ms=${offsetNs / 1_000_000} rs=$rsDir\n")
+            StabLog.line("# stream=${inW}x$inH swap=$swap st=${stM.take(6).joinToString(";")} rotation=${rotationFor()} lookahead_ms=${lookNs / 1_000_000} fMain=$fMain lensR=$lensR czMin=$czMin smooth_s=$sigma time_offset_ms=${offsetNs / 1_000_000} rs=$rsDir\n")
         }
         StabLog.line("f,$src,$pts,${fd.exp},${fd.skew},${fd.cz},${fd.e},${fd.k},${fd.phys ?: ""}\n")
     }
@@ -824,6 +837,9 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         GLES20.glUniformMatrix3fv(p.uH, NB, false, hs, 0)
         GLES20.glUniformMatrix4fv(p.uPost, 1, false, post, 0)
         GLES20.glUniform1f(p.uRs, rsDir.toFloat())
+        // ułamek odczytu matrycy dla punktu obrazu: linie matrycy biegną wzdłuż jej dłuższego boku
+        if (swap) { if (rsDir >= 0) GLES20.glUniform3f(p.uRv, -1f, 0f, 1f) else GLES20.glUniform3f(p.uRv, 1f, 0f, 0f) }
+        else { if (rsDir >= 0) GLES20.glUniform3f(p.uRv, 0f, -1f, 1f) else GLES20.glUniform3f(p.uRv, 0f, 1f, 0f) }
         GLES20.glEnableVertexAttribArray(p.aPos); GLES20.glVertexAttribPointer(p.aPos, 2, GLES20.GL_FLOAT, false, 0, QUAD)
         GLES20.glEnableVertexAttribArray(p.aTex); GLES20.glVertexAttribPointer(p.aTex, 2, GLES20.GL_FLOAT, false, 0, QUAD_TEX)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -842,7 +858,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         for (id in t) {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
             texParams(GLES20.GL_TEXTURE_2D)
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, inW, inH, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, imgW, imgH, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
         }
         val f = IntArray(1); GLES20.glGenFramebuffers(1, f, 0)
         if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
@@ -862,7 +878,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val slot = (ringStart + ringCount) % n
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, ringFbo)
         GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, ringTex[slot], 0)
-        GLES20.glViewport(0, 0, inW, inH)
+        GLES20.glViewport(0, 0, imgW, imgH)
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glUseProgram(progCopy)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
