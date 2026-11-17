@@ -791,6 +791,11 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         }
 
         if (wantDelay && !ringTried) allocRing()
+        if (ringOk && ringCount > 0) {
+            // klatki zostałe w buforze z poprzedniego nagrania (strumień stoi między nagraniami) – nie mogą trafić do nowego filmu
+            val newest = ringTc[(ringStart + ringCount - 1) % ringTex.size]
+            if (tC - newest > 300_000_000L || tC < newest) { ringStart = 0; ringCount = 0 }
+        }
         if (ringOk) { pushRing(ts, tC, e); emitDelayed(ts, rot, corners); return }
 
         val As = bands(fdNow)
