@@ -20,6 +20,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var join: View
     private lateinit var nameIn: EditText
     private lateinit var codeIn: EditText
+    private lateinit var asCoachBox: android.widget.CheckBox
     private lateinit var resumeBtn: View
     private lateinit var updBtn: com.google.android.material.button.MaterialButton
     private lateinit var verTxt: TextView
@@ -59,13 +60,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         when (Engine.role) {
             Engine.Role.COACH -> { startActivity(Intent(this, CoachActivity::class.java)); return }
-            Engine.Role.ATHLETE -> { startActivity(Intent(this, AthleteActivity::class.java)); return }
+            Engine.Role.ATHLETE -> { startActivity(Intent(this, if (Engine.athAsCoach) CoachActivity::class.java else AthleteActivity::class.java)); return }
             else -> {}
         }
         StandbyService.ensure(this)
         val s = Prefs.session()
         resumeBtn.visibility = if (s != null) View.VISIBLE else View.GONE
         (resumeBtn as TextView).text = if (s?.optString("role") == "coach") "↻ Wznów sesję trenera (${Prefs.currentRoom().name})"
+                                       else if (s?.optBoolean("asCoach") == true) "↻ Wznów jako drugi trener (pokój ${s.optString("room")})"
                                        else "↻ Wznów połączenie (pokój ${s?.optString("room")})"
         if (s != null && Prefs.resumeAfterUpdate) { Prefs.resumeAfterUpdate = false; resume() }
     }
@@ -101,7 +103,8 @@ class MainActivity : AppCompatActivity() {
             resumeBtn = button("↻ Wznów sesję", "primary") { resume() }
             addView(resumeBtn, lp(top = dp(24)))
             addView(button("Jestem trenerem") { askAndStartCoach() }, lp(top = dp(12)))
-            addView(button("Jestem zawodnikiem") { showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
+            addView(button("Jestem zawodnikiem") { asCoachBox.isChecked = false; showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
+            addView(button("Dołączam jako drugi trener") { asCoachBox.isChecked = true; showJoin(Prefs.lastRoom) }, lp(top = dp(12)))
             updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { showUpdateDialog(it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
@@ -120,12 +123,16 @@ class MainActivity : AppCompatActivity() {
             filters = arrayOf(InputFilter.AllCaps(), InputFilter.LengthFilter(8)); gravity = Gravity.CENTER
             letterSpacing = 0.3f; setTextColor(col(R.color.txt)); setHintTextColor(col(R.color.mut)); textSize = 24f
         }
+        asCoachBox = android.widget.CheckBox(this).apply {
+            text = "Dołączam jako drugi trener (kamera, nagrywanie, sterowanie zawodnikami)"; setTextColor(col(R.color.txt)); textSize = 15f
+        }
         val j = column(0).apply {
             addView(text("Dołącz do treningu", 26f, bold = true).apply { gravity = Gravity.CENTER })
             addView(text("Twoje imię", 14f, col(R.color.mut)), lp(top = dp(20)))
             addView(nameIn, lp())
             addView(text("Kod pokoju (od trenera)", 14f, col(R.color.mut)), lp(top = dp(12)))
             addView(codeIn, lp())
+            addView(asCoachBox, lp(top = dp(12)))
             addView(button("Połącz z trenerem", "primary") { joinClicked() }, lp(top = dp(20)))
             addView(button("Wróć") { showHome() }, lp(top = dp(12)))
         }
@@ -147,13 +154,13 @@ class MainActivity : AppCompatActivity() {
         if (name.isEmpty()) { Notifier.toast("Wpisz imię"); return }
         if (code.length < 4) { Notifier.toast("Wpisz kod pokoju"); return }
         Prefs.athName = name; Prefs.lastRoom = code
-        askAndStartAthlete(code, name)
+        askAndStartAthlete(code, name, asCoachBox.isChecked)
     }
 
     private fun resume() {
         val s = Prefs.session() ?: return
         if (s.optString("role") == "coach") askAndStartCoach()
-        else askAndStartAthlete(s.optString("room"), s.optString("name"))
+        else askAndStartAthlete(s.optString("room"), s.optString("name"), s.optBoolean("asCoach"))
     }
 
     private fun basePerms() = buildList {
@@ -175,15 +182,17 @@ class MainActivity : AppCompatActivity() {
         perms.launch((basePerms() + Manifest.permission.CAMERA).toTypedArray())
     }
 
-    private fun askAndStartAthlete(code: String, name: String) {
+    private fun askAndStartAthlete(code: String, name: String, asCoach: Boolean = false) {
         pending = {
-            Prefs.wasAthlete = true
+            if (!asCoach) Prefs.wasAthlete = true
             StandbyService.stop(this)
-            Prefs.saveSession("athlete", code, name)
-            Engine.startAthlete(code, name)
-            SessionService.start(this, coach = false, camera = false)
-            startActivity(Intent(this, AthleteActivity::class.java))
+            Prefs.saveSession("athlete", code, name, asCoach)
+            Engine.startAthlete(code, name, asCoach)
+            val cam = asCoach && granted(Manifest.permission.CAMERA)
+            if (asCoach && !cam) Notifier.toast("Bez dostępu do kamery nie będzie nagrywania")
+            SessionService.start(this, coach = asCoach, camera = cam)
+            startActivity(Intent(this, if (asCoach) CoachActivity::class.java else AthleteActivity::class.java))
         }
-        perms.launch(basePerms().toTypedArray())
+        perms.launch((if (asCoach) basePerms() + Manifest.permission.CAMERA else basePerms()).toTypedArray())
     }
 }

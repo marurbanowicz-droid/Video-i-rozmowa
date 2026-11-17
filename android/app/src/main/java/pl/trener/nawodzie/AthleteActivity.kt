@@ -53,7 +53,7 @@ class AthleteActivity : AppCompatActivity(), Engine.Ui {
             true
         }
         muteAll = button("Wycisz wszystko") { Engine.toggleFullMute() }
-        spkBtn = button("") { Prefs.speaker = !Prefs.speaker; AudioRouter.apply(); refresh() }
+        spkBtn = button("") { Prefs.speaker = !Prefs.speaker; AudioRouter.apply(); refresh(); Engine.reportSettings() }
         dataTxt = text("", 13f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
         root.addView(title, lp())
         root.addView(status, lp(top = dp(16)))

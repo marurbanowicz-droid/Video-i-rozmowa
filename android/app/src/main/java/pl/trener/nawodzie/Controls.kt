@@ -22,7 +22,7 @@ object Controls {
     private var lastVol = LongArray(2)
     private lateinit var app: Context
 
-    private fun isCoach() = Engine.role == Engine.Role.COACH
+    private fun isCoach() = Engine.coachUi
 
     fun run(action: String, down: Boolean, holdCapable: Boolean) {
         if (Engine.role == Engine.Role.NONE) return
@@ -30,6 +30,7 @@ object Controls {
             "mute_all" -> if (down) Engine.toggleFullMute()
             "mute_mic" -> if (down) toggleMic()
             "ptt" -> if (Prefs.talkMode != "ptt") { if (down) toggleMic() } else ptt(down, holdCapable)
+            "note" -> if (down) { if (isCoach()) VoiceNote.toggle(app) else Notifier.toast("Notatki głosowe są dostępne na ekranie trenera") }
             "record" -> if (down) {
                 if (isCoach()) {
                     val rec = CamRec.recording != null

@@ -116,7 +116,7 @@ class SessionService : LifecycleService() {
         } else Engine.athStatus.ifEmpty { "Połączenie z trenerem" }
         val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle(if (coach) "Sesja trenera – ${Prefs.currentRoom().name}" else "Trener na wodzie")
+            .setContentTitle(if (coach) "Sesja trenera – ${if (Engine.role == Engine.Role.COACH) Prefs.currentRoom().name else Engine.athRoomName.ifEmpty { "Pokój" }}" else "Trener na wodzie")
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

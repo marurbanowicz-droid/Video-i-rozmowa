@@ -43,6 +43,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private lateinit var stabPill: TextView
     private lateinit var noiseBtn: ImageButton
     private lateinit var recInfo: TextView
+    private lateinit var notePill: TextView
     private lateinit var muteBanner: TextView
     private lateinit var athList: LinearLayout
     private lateinit var presets: LinearLayout
@@ -198,6 +199,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         recInfo = text("", 13f, bold = true).apply {
             background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(8), dp(4), dp(8), dp(4)); visibility = View.GONE; maxLines = 1
         }
+        notePill = pillText("🎙 Notatka").apply { setOnClickListener { VoiceNote.toggle(this@CoachActivity); updateNote() } }
         athList = LinearLayout(this).apply { orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
 
         if (!landscape) {
@@ -215,6 +217,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 addView(android.widget.HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; addView(athList) },
                     LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6); marginEnd = dp(6) })
                 addView(recInfo)
+                addView(notePill, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(6) })
             }
             val top = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM
@@ -235,6 +238,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 addView(evBox, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(statusPill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(recInfo, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                addView(notePill, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
                 addView(athList, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
             }
             root.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(col, FrameLayout.LayoutParams(-1, -2)) },
@@ -395,7 +399,15 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         refresh()
     }
 
+    private fun updateNote() {
+        val rec = VoiceNote.recording
+        if (rec) { val s = (System.currentTimeMillis() - VoiceNote.startedAt) / 1000; notePill.text = String.format(Locale.US, "●  %d:%02d  ■", s / 60, s % 60) }
+        else notePill.text = if (VoiceNote.processing) "Zapis…" else "🎙 Notatka"
+        notePill.background = roundBg(if (rec) Color.parseColor("#E6FF3B30") else glass, dp(16).toFloat())
+    }
+
     private fun updateRecTime() {
+        updateNote()
         val r = CamRec.recording != null
         recInfo.visibility = if (r || CamRec.muxing) View.VISIBLE else View.GONE
         if (r) { val s = (System.currentTimeMillis() - CamRec.recStartedAt) / 1000; recInfo.text = String.format(Locale.US, "●  %02d:%02d", s / 60, s % 60) }
@@ -407,11 +419,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         refresh()
     }
 
+    private val isHost get() = Engine.role == Engine.Role.COACH
+    private fun roomName() = if (isHost) Prefs.currentRoom().name else Engine.athRoomName.ifEmpty { "Pokój" }
+    private fun roomCode() = if (isHost) Prefs.currentRoom().code else Engine.athCode
+
     private fun refresh() {
-        val r = Prefs.currentRoom()
         val all = Engine.athletesView; val on = all.count { it.status == "online" }
-        statusPill.text = "$on" + (if (all.size > on) "/${all.size}" else "") + (if (landscape) "" else "  ·  ${r.name.take(10)}")
-        statusPill.setTextColor(if (Engine.signalOpen) Color.WHITE else ACCENT)
+        statusPill.text = "$on" + (if (all.size > on) "/${all.size}" else "") + (if (landscape) "" else "  ·  ${roomName().take(10)}")
+        statusPill.setTextColor(if (Engine.signalOpen && (isHost || Engine.athLink)) Color.WHITE else ACCENT)
         evTxt.text = CamRec.evLabel()
         evTxt.setTextColor(if (Prefs.evIndex != 0) ACCENT else Color.WHITE)
         evBox.visibility = if (CamRec.camera == null || CamRec.evSupported()) View.VISIBLE else View.GONE
@@ -438,7 +453,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         updateRecTime()
         // zawodnicy – każdy z osobnym wyciszeniem. Listę przebudowujemy tylko, gdy coś się w niej zmieniło:
         // odświeżanie co 2 s (licznik danych) podmieniałoby przyciski pod palcem i gubiło dotknięcia.
-        val sig = r.code + "#" + Engine.soloCid + "#" + all.joinToString("|") { "${it.cid}:${it.name}:${it.status}:${it.muted}:${it.sendOn}" }
+        val sig = roomCode() + "#" + Engine.soloCid + "#" + all.joinToString("|") { "${it.cid}:${it.name}:${it.status}:${it.muted}:${it.sendOn}" }
         if (sig == listSig) return
         listSig = sig
         athList.removeAllViews()
@@ -499,13 +514,13 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
     // ---------------- panel zarządzania pokojem ----------------
     private fun roomPanel() {
-        val r = Prefs.currentRoom()
+        val r = Room(roomCode(), roomName())
         val head = text("", 13f, col(R.color.mut))
         val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val box = column(16).apply {
             gravity = Gravity.START
             addView(head, lp())
-            addView(LinearLayout(context).apply {
+            if (isHost) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(button("Zadzwoń…") { callDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
                 addView(button("Pokoje…") { roomsDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
@@ -537,7 +552,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         fun build(all: List<Engine.AthleteView>) {
             listBox.removeAllViews(); rows.clear()
-            if (all.isEmpty()) listBox.addView(text("Nikt nie jest połączony. Zaproś zawodników albo zadzwoń do osób, które już tu były.", 14f, col(R.color.mut)), lp(top = dp(8)))
+            if (all.isEmpty()) listBox.addView(text(if (isHost) "Nikt nie jest połączony. Zaproś zawodników albo zadzwoń do osób, które już tu były." else "Nikogo jeszcze nie ma na liście od trenera głównego.", 14f, col(R.color.mut)), lp(top = dp(8)))
             for (a in all) {
                 val name = text(a.name, 16f, bold = true)
                 val info = text("", 12f, col(R.color.mut))
@@ -555,9 +570,14 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL; background = roundBg(col(R.color.card2), dp(14).toFloat()); setPadding(dp(12), dp(10), dp(12), dp(10))
                     addView(name); addView(info)
-                    addView(line(send, "Nadaję", slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }), lp(top = dp(6)))
+                    addView(line(send, "Nadaję", if (isHost) slider(a.sendVol) { v -> Engine.setAthleteSendVol(a.cid, v) }
+                        else text("włącz / wyłącz mój głos u tej osoby", 12f, col(R.color.mut)).apply { setPadding(dp(8), 0, 0, 0) }), lp(top = dp(6)))
                     addView(line(recv, "Odbieram", slider(a.recvVol) { v -> Engine.setAthleteRecvVol(a.cid, v) }), lp(top = dp(4)))
-                    addView(solo, lp(top = dp(6)))
+                    if (isHost) addView(solo, lp(top = dp(6)))
+                    if (a.app) addView(text("⚙ Ustawienia zawodnika…", 13f, bold = true).apply {
+                        gravity = Gravity.CENTER; setPadding(dp(10), dp(8), dp(10), dp(8)); background = roundBg(col(R.color.card), dp(12).toFloat())
+                        setOnClickListener { athleteSettings(a.cid) }
+                    }, lp(top = dp(6)))
                 }
                 listBox.addView(card, lp(top = dp(8)))
                 rows[a.cid] = Row(info, send, recv, solo)
@@ -566,9 +586,9 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         fun update() {
             val all = Engine.athletesView
             val on = all.count { it.status == "online" }
-            head.text = "Kod ${Prefs.currentRoom().code} · połączonych $on z ${all.size} · dane ${fmtBytes(Engine.bytesSent + Engine.bytesRecv)}" +
+            head.text = "Kod ${roomCode()} · połączonych $on z ${all.size} · dane ${fmtBytes(Engine.bytesSent + Engine.bytesRecv)}" +
                 if (!Engine.signalOpen) " · łączenie z serwerem…" else ""
-            val key = all.joinToString("|") { it.cid + it.name }
+            val key = all.joinToString("|") { it.cid + it.name + it.app }
             if (key != builtFor) { builtFor = key; build(all) }
             for (a in all) {
                 val row = rows[a.cid] ?: continue
@@ -594,6 +614,68 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         dlg.setOnShowListener { Engine.addUi(ui) }
         dlg.setOnDismissListener { Engine.removeUi(ui) }
         dlg.show()
+    }
+
+    // ---------------- zdalne ustawienia zawodnika ----------------
+    private val GAINS = listOf("1", "2", "3", "4", "6", "8")
+    private val MICS = listOf("0.5", "0.75", "1", "1.5", "2", "3", "4")
+    private val ACT_NAMES = mapOf("volume" to "Zwykła głośność", "mute_all" to "Wycisz wszystko", "mute_mic" to "Wycisz mikrofon",
+        "ptt" to "Push-to-talk", "record" to "Nagrywanie", "note" to "Notatka głosowa")
+
+    /** Okno sterowania ustawieniami aplikacji wybranego zawodnika (zmiany działają od razu u niego). */
+    private fun athleteSettings(cid: String) {
+        val v = Engine.athletesView.firstOrNull { it.cid == cid } ?: return
+        val st = HashMap(v.cfg)
+        val known = v.cfg.isNotEmpty()
+        fun put(k: String, x: String) { st[k] = x; Engine.setAthleteSetting(cid, k, x) }
+        val box = column(16).apply { gravity = Gravity.START }
+        if (!known) box.addView(text("Aplikacja zawodnika jeszcze nie zgłosiła swoich ustawień – pokazane są wartości domyślne.", 12f, col(R.color.mut)), lp())
+        fun sw(label: String, key: String, def: Boolean) {
+            val c = androidx.appcompat.widget.SwitchCompat(this).apply {
+                text = label; setTextColor(col(R.color.txt)); textSize = 15f
+                isChecked = (st[key] ?: def.toString()) == "true"
+                setOnCheckedChangeListener { _, on -> put(key, on.toString()) }
+            }
+            box.addView(c, lp(top = dp(10)))
+        }
+        fun seek(label: String, max: Int, start: Int, fmt: (Int) -> String, done: (Int) -> Unit) {
+            val t = text(label + ": " + fmt(start), 13f, col(R.color.mut))
+            val sb = android.widget.SeekBar(this).apply {
+                this.max = max; progress = start.coerceIn(0, max)
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: android.widget.SeekBar, p: Int, u: Boolean) { t.text = label + ": " + fmt(p) }
+                    override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
+                    override fun onStopTrackingTouch(s: android.widget.SeekBar) { done(s.progress) }
+                })
+            }
+            box.addView(t, lp(top = dp(12))); box.addView(sb, lp())
+        }
+        fun choice(label: String, key: String, values: List<String>, names: (String) -> String, def: String) {
+            val b = button("") {}
+            fun show() { b.text = label + ": " + names(st[key] ?: def) }
+            b.setOnClickListener {
+                val i = values.indexOf(st[key] ?: def)
+                put(key, values[(i + 1) % values.size]); show()
+            }
+            show(); box.addView(b, lp(top = dp(8)))
+        }
+        sw("Dźwięk z głośnika (wyłączone = słuchawki)", "speaker", false)
+        sw("Mikrofon wyciszony", "mute", false)
+        sw("Wyciszone wszystko (mikrofon i dźwięk)", "full_mute", false)
+        seek("Głośność rozmowy", 10, (st["voice_pct"]?.toIntOrNull() ?: 80) / 10, { "${it * 10}%" }) { put("voice_pct", (it * 10).toString()) }
+        seek("Wzmocnienie odbieranego głosu", GAINS.size - 1, GAINS.indexOf(st["gain"] ?: "3").coerceAtLeast(0), { GAINS[it] + "×" }) { put("gain", GAINS[it]) }
+        seek("Wzmocnienie mikrofonu", MICS.size - 1, MICS.indexOf(st["mic_gain"] ?: "1").coerceAtLeast(0), { MICS[it] + "×" }) { put("mic_gain", MICS[it]) }
+        choice("Tryb rozmowy", "talk_mode", listOf("open", "ptt"), { if (it == "ptt") "naciśnij, aby mówić" else "ciągła" }, "open")
+        val acts = if (v.coach) listOf("volume", "mute_all", "mute_mic", "ptt", "record", "note") else listOf("volume", "mute_all", "mute_mic", "ptt")
+        choice("Przycisk głośności +", "vol_up", acts, { ACT_NAMES[it] ?: it }, if (v.coach) "mute_all" else "volume")
+        choice("Przycisk głośności −", "vol_down", acts, { ACT_NAMES[it] ?: it }, if (v.coach) "record" else "volume")
+        choice("Środkowy przycisk słuchawek", "headset_action", acts.drop(1), { ACT_NAMES[it] ?: it }, "mute_all")
+        if (!v.coach) {
+            sw("Redukcja szumów", "ath_noise", true)
+            sw("Filtr niskich tonów (wiatr)", "ath_wind", true)
+        }
+        MaterialAlertDialogBuilder(this).setTitle(v.name).setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("Zamknij", null).show()
     }
 
     private fun ago(t: Long): String {
@@ -625,7 +707,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
     // ---------------- zaproszenie ----------------
     private fun inviteDialog() {
-        val r = Prefs.currentRoom()
+        val r = Room(roomCode(), roomName())
         val link = inviteLink(r.code)
         val box = column(16).apply {
             addView(ImageView(context).apply { setImageBitmap(qrBitmap(link, 600)); adjustViewBounds = true }, LinearLayout.LayoutParams(dp(260), dp(260)))
