@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var resumeBtn: View
     private lateinit var updBtn: com.google.android.material.button.MaterialButton
     private lateinit var verTxt: TextView
+    private lateinit var webLinkTxt: TextView
     private var pending: (() -> Unit)? = null
 
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::webLinkTxt.isInitialized) webLinkTxt.text = webLink()
         when (Engine.role) {
             Engine.Role.COACH -> { startActivity(Intent(this, CoachActivity::class.java)); return }
             Engine.Role.ATHLETE -> { startActivity(Intent(this, if (Engine.athAsCoach) CoachActivity::class.java else AthleteActivity::class.java)); return }
@@ -95,6 +97,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val WEB_URL = "https://marurbanowicz-droid.github.io/Video-i-rozmowa/"
+    /** Link dla iPhone'ów: adres strony + adres danych TURN (jeśli ustawiony w aplikacji). */
+    private fun webLink(): String =
+        if (Prefs.turnUrl.isEmpty()) WEB_URL else WEB_URL + "?turn=" + java.net.URLEncoder.encode(Prefs.turnUrl, "UTF-8")
 
     private fun buildUi() {
         val root = column(24).apply { gravity = Gravity.CENTER }
@@ -114,9 +119,10 @@ class MainActivity : AppCompatActivity() {
             addView(column(14).apply {
                 background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(col(R.color.card)); setStroke(dp(1), col(R.color.mut)) }
                 addView(text("📱 Link dla zawodników z iPhone’em", 14f, bold = true))
-                addView(text(WEB_URL, 13f, col(R.color.mut)).apply { setTextIsSelectable(true) }, lp(top = dp(4)))
+                webLinkTxt = text(webLink(), 13f, col(R.color.mut)).apply { setTextIsSelectable(true) }
+                addView(webLinkTxt, lp(top = dp(4)))
                 addView(button("Kopiuj link") {
-                    getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("link", WEB_URL))
+                    getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("link", webLink()))
                     Notifier.toast("Skopiowano link")
                 }, lp(top = dp(8)))
             }, lp(top = dp(20)))
