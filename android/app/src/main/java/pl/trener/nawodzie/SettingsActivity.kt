@@ -91,9 +91,9 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
 
         val talk = cat("Rozmowa i przyciski", "talk")
         talk.list("talk_mode", "Tryb rozmowy", arrayOf("Rozmowa ciągła", "Push-to-talk (naciśnij, aby mówić)"), arrayOf("open", "ptt"), "open")
-        val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop")
+        val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop", "Ponton: wycisz wszystkich")
                    else arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk")
-        val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record", "note") else arrayOf("mute_all", "mute_mic", "ptt")
+        val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone") else arrayOf("mute_all", "mute_mic", "ptt")
         talk.list("headset_action", "Środkowy przycisk słuchawek", acts, actVals, "mute_all")
         talk.list("vol_up", "Przycisk głośności +", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, "mute_all")
         talk.list("vol_down", "Przycisk głośności −", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, if (coach) "record" else "volume")
