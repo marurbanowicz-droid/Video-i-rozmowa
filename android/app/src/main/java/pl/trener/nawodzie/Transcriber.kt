@@ -67,16 +67,38 @@ object Transcriber {
         val parts = split(samples)
         val sb = StringBuilder()
         var firstErr: String? = null
+        var offline = true          // najpierw tryb offline; przy braku polskiego pakietu – zwykła usługa mowy (z internetem)
         for ((i, seg) in parts.withIndex()) {
             val f = File(ctx.cacheDir, "stt_$i.pcm")
             try {
                 f.outputStream().use { o -> val b = java.nio.ByteBuffer.allocate(seg.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN); seg.forEach { b.putShort(it) }; o.write(b.array()) }
-                val r = recognize(ctx, f)
+                var r = recognize(ctx, f, offline)
+                if (offline && r.third in LANG_ERRORS) {
+                    if (i == 0) requestPlPack(ctx)
+                    offline = false
+                    r = recognize(ctx, f, false)
+                }
                 if (r.first != null) { if (sb.isNotEmpty()) sb.append(' '); sb.append(r.first) }
                 else if (r.second != null && firstErr == null) firstErr = r.second
             } finally { f.delete() }
         }
         return if (sb.isNotBlank()) Result(sb.toString().trim(), null) else Result(null, firstErr ?: "nie rozpoznano mowy")
+    }
+
+    private val LANG_ERRORS = setOf(12, 13)   // ERROR_LANGUAGE_NOT_SUPPORTED / ERROR_LANGUAGE_UNAVAILABLE
+
+    /** Prosi telefon o pobranie polskiego pakietu mowy do rozpoznawania offline (przyda się następnym razem). */
+    private fun requestPlPack(ctx: Context) {
+        if (Build.VERSION.SDK_INT < 33) return
+        onMain {
+            try {
+                if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) return@onMain
+                val sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pl-PL")
+                sr.triggerModelDownload(i)
+                mainHandler.postDelayed({ try { sr.destroy() } catch (_: Throwable) {} }, 60_000)
+            } catch (_: Throwable) {}
+        }
     }
 
     /** Miesza do mono i zmniejsza próbkowanie do 16 kHz (interpolacja liniowa). */
@@ -116,14 +138,14 @@ object Transcriber {
     }
 
     /** Rozpoznaje jeden fragment (pliku PCM 16 kHz mono). Zwraca tekst albo opis błędu. */
-    private fun recognize(ctx: Context, raw: File): Pair<String?, String?> {
-        var text: String? = null; var err: String? = null
+    private fun recognize(ctx: Context, raw: File, offline: Boolean): Triple<String?, String?, Int> {
+        var text: String? = null; var err: String? = null; var code = 0
         val done = CountDownLatch(1)
         var rec: SpeechRecognizer? = null
         var pfd: ParcelFileDescriptor? = null
         onMain {
             try {
-                val sr = if (Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                val sr = if (offline && Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
                          else SpeechRecognizer.createSpeechRecognizer(ctx)
                 rec = sr
                 sr.setRecognitionListener(object : RecognitionListener {
@@ -136,9 +158,10 @@ object Transcriber {
                     override fun onEvent(t: Int, b: Bundle?) {}
                     override fun onResults(b: Bundle?) { text = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull(); done.countDown() }
                     override fun onError(e: Int) {
+                        code = e
                         err = when (e) {
                             SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> null   // fragment bez mowy
-                            12, 13 -> "brak polskiego pakietu mowy w telefonie (Ustawienia → Język → rozpoznawanie mowy)"
+                            12, 13 -> "telefon nie ma polskiego rozpoznawania mowy – pobierz pakiet w Ustawienia → Zarządzanie ogólne → Język → Zamiana głosu na tekst, albo wpisz klucz OpenAI w ustawieniach aplikacji"
                             SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "brak internetu dla rozpoznawania mowy"
                             else -> "rozpoznawanie mowy zwróciło błąd $e"
                         }
@@ -161,6 +184,6 @@ object Transcriber {
         }
         if (!done.await(60, TimeUnit.SECONDS)) err = err ?: "rozpoznawanie mowy nie odpowiada"
         onMain { try { rec?.cancel(); rec?.destroy() } catch (_: Throwable) {}; try { pfd?.close() } catch (_: Throwable) {} }
-        return text to err
+        return Triple(text, err, code)
     }
 }
