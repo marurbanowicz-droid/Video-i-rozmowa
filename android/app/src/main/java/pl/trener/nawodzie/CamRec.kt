@@ -67,11 +67,11 @@ object CamRec {
 
     // ---------------- usypianie kamery ----------------
     // Kamera (a w trybach SUPER także przetwarzanie obrazu i żyroskop) nie pracuje, gdy ekranu trenera nie widać
-    // i nic się nie nagrywa. Nagrywanie z przycisków przy zgaszonym ekranie najpierw budzi kamerę (ok. 1 s).
+    // i nic się nie nagrywa. Nagrywanie wymaga otwartego ekranu aplikacji (po 5 s bez ekranu kamera zasypia).
     @Volatile private var uiVisible = false
     @Volatile var sleeping = false; private set
     private var pendingStart: Context? = null
-    private const val SLEEP_MS = 15_000L
+    private const val SLEEP_MS = 5_000L
     private val sleepR = Runnable {
         if (uiVisible || recording != null || pendingStart != null || sleeping) return@Runnable
         val p = provider ?: return@Runnable
@@ -407,12 +407,7 @@ object CamRec {
     @SuppressLint("MissingPermission")
     fun startRec(ctx: Context): Boolean {
         val vc = videoCapture ?: run {
-            if (sleeping && provider != null && owner != null) {
-                pendingStart = ctx.applicationContext
-                Notifier.toast("Uruchamiam kamerę…")
-                rebind(); return true
-            }
-            Notifier.toast("Kamera nie jest gotowa"); return false
+            Notifier.toast(if (sleeping) "Kamera śpi – otwórz ekran aplikacji, żeby nagrywać" else "Kamera nie jest gotowa"); return false
         }
         if (recording != null) return false
         val app = ctx.applicationContext
