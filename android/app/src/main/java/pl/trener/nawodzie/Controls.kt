@@ -28,6 +28,7 @@ object Controls {
         if (Engine.role == Engine.Role.NONE) return
         when (action) {
             "mute_all" -> if (down) Engine.toggleFullMute()
+            "mute_everyone" -> if (down) { if (isCoach()) Engine.toggleAllMute() else Notifier.toast("Tryb ponton jest dostępny na ekranie trenera") }
             "mute_mic" -> if (down) toggleMic()
             "ptt" -> if (Prefs.talkMode != "ptt") { if (down) toggleMic() } else ptt(down, holdCapable)
             "note" -> if (down) { if (isCoach()) VoiceNote.toggle(app) else Notifier.toast("Notatki głosowe są dostępne na ekranie trenera") }

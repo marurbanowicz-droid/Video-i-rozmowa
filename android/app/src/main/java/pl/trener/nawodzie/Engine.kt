@@ -70,6 +70,8 @@ object Engine {
     @Volatile var micOn = true; private set
     /** Wyciszenie wszystkiego: nic nie wysyłamy i nic nie słychać. */
     @Volatile var fullMute = false; private set
+    /** Tryb „ponton”: trener wyciszył wszystkich (siebie i wszystkich zawodników – mikrofon i dźwięk). */
+    @Volatile var allMute = false; private set
     /** Push-to-talk: czy właśnie mówimy. */
     @Volatile var pttActive = false; private set
     @Volatile var bytesSent = 0L; private set
@@ -196,7 +198,7 @@ object Engine {
     private fun startCoachNow() {
         if (role != Role.NONE) return
         StandbyService.releaseIds()   // czuwanie zwalnia identyfikatory pokoi, zanim sesja je zajmie
-        role = Role.COACH; micOn = true; fullMute = false; pttActive = false; resetStats()
+        role = Role.COACH; micOn = true; fullMute = false; allMute = false; pttActive = false; resetStats()
         blockSet = Prefs.block(Prefs.currentRoom().code)
         try { initRtc(Prefs.coachNoise, Prefs.coachWind) } catch (e: Exception) { Log.e(TAG, "rtc", e); Notifier.toast("Błąd audio: ${e.message}") }
         startLoopback()
@@ -217,7 +219,7 @@ object Engine {
         if (role != Role.NONE) return
         StandbyService.releaseIds()
         athAsCoach = asCoach; micOn = true; noteMute = false; coMuted.clear(); coSendOff.clear(); coVolSent.clear(); coachVols.clear(); blockSet = emptySet()
-        role = Role.ATHLETE; fullMute = false; pttActive = false; resetStats()
+        role = Role.ATHLETE; fullMute = false; allMute = false; pttActive = false; resetStats()
         athPeerId = "tnw-" + Prefs.cid.lowercase() + "-" + Prefs.genCode(4).lowercase()
         athCode = code; athName = if (asCoach && !name.startsWith("Trener ")) "Trener $name" else name
         athRoomName = ""; athLink = false; athEverLinked = false
@@ -240,7 +242,7 @@ object Engine {
     private fun teardown() {
         timers.forEach { it.cancel(false) }; timers.clear()
         reconnectF?.cancel(false); reconnectF = null
-        role = Role.NONE; fullMute = false; pttActive = false; soloCid = null; athAsCoach = false; noteMute = false; blockSet = emptySet()
+        role = Role.NONE; fullMute = false; allMute = false; pttActive = false; soloCid = null; athAsCoach = false; noteMute = false; blockSet = emptySet()
         links.values.toList().forEach { closeLink(it) }
         links.clear(); athletes.clear(); dataLinks.clear(); mesh.clear(); meshUp = emptySet(); athMedia = null; athData = null
         signal?.close(); signal = null; signalOpen = false
@@ -610,6 +612,7 @@ object Engine {
         if (st == DataChannel.State.OPEN) {
             if (role == Role.COACH && l.type == "data") {
                 dcSend(l, rosterMsg()); dcSend(l, JSONObject().put("t", "cfg").put("kbps", Prefs.kbps))
+                if (allMute) dcSend(l, JSONObject().put("t", "set").put("k", "full_mute").put("v", "true"))
                 athletes[l.cid]?.let { dcSend(l, JSONObject().put("t", "vol").put("v", it.sendVol.toDouble())) }
             }
             if (role == Role.ATHLETE && l === athData) sendStatus()
@@ -700,6 +703,19 @@ object Engine {
         if (role == Role.ATHLETE) sendStatus()
         Notifier.beep(if (fullMute) "leave" else "join")
         Notifier.toast(if (fullMute) "Wyciszono wszystko (mikrofon i dźwięk)" else "Dźwięk przywrócony")
+    }
+    fun toggleAllMute() = setAllMute(!allMute)
+    /** Wycisza (albo przywraca) wszystkich w pokoju naraz – siebie i każdego zawodnika; nowo dołączający też są wyciszani. */
+    fun setAllMute(on: Boolean) = exec.execute {
+        if (!(role == Role.COACH || (role == Role.ATHLETE && athAsCoach))) return@execute
+        allMute = on
+        fullMute = on; applyLocal(); applyRemote()
+        val targets = if (role == Role.COACH) athletes.values.filter { it.status == "online" }.map { it.cid }
+                      else athRoster.filter { it.on && it.id != Prefs.cid }.map { it.id }
+        targets.forEach { setAthleteSetting(it, "full_mute", on.toString()) }
+        Notifier.beep(if (on) "leave" else "join")
+        Notifier.toast(if (on) "Tryb ponton: wyciszono wszystkich" else "Tryb ponton wyłączony – dźwięk przywrócony")
+        changed(); if (role == Role.ATHLETE) sendStatus()
     }
     fun setFullMute(on: Boolean) = exec.execute { if (fullMute != on) { fullMute = on; applyLocal(); applyRemote(); changed(); if (role == Role.ATHLETE) sendStatus() } }
     fun setPtt(on: Boolean) = exec.execute { if (pttActive != on) { pttActive = on; applyLocal(); changed() } }
@@ -1012,7 +1028,7 @@ object Engine {
     private fun applyRemoteSetting(k: String, s: String) {
         if (k.startsWith("cvol_")) { s.toFloatOrNull()?.let { coachVols[k.removePrefix("cvol_")] = it.coerceIn(0f, 3f); applyRemote() }; return }
         val ed = Prefs.sp.edit()
-        val actions = setOf("volume", "mute_all", "mute_mic", "ptt", "record", "note")
+        val actions = setOf("volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone")
         when (k) {
             "speaker" -> { Prefs.speaker = s == "true"; onMain { AudioRouter.apply() } }
             "mute" -> { athMuted = s == "true"; micOn = !athMuted; applyLocal() }
@@ -1026,8 +1042,8 @@ object Engine {
             "gain" -> s.toDoubleOrNull()?.let { ed.putString("gain", it.coerceIn(0.0, 10.0).toString().removeSuffix(".0")).apply(); applyRemote() }
             "mic_gain" -> s.toFloatOrNull()?.let { ed.putString("mic_gain", it.coerceIn(0.25f, 4f).toString().removeSuffix(".0")).apply() }
             "talk_mode" -> if (s == "open" || s == "ptt") { ed.putString("talk_mode", s).apply(); pttActive = false; applyLocal() }
-            "vol_up", "vol_down" -> if (s in actions && ((s != "record" && s != "note") || athAsCoach)) { ed.putString(k, s).apply(); onMain { Controls.applyVolumeMode() } }
-            "headset_action" -> if (s in actions && ((s != "record" && s != "note") || athAsCoach)) ed.putString(k, s).apply()
+            "vol_up", "vol_down" -> if (s in actions && ((s != "record" && s != "note" && s != "mute_everyone") || athAsCoach)) { ed.putString(k, s).apply(); onMain { Controls.applyVolumeMode() } }
+            "headset_action" -> if (s in actions && ((s != "record" && s != "note" && s != "mute_everyone") || athAsCoach)) ed.putString(k, s).apply()
             "ath_noise" -> { ed.putBoolean(k, s == "true").apply(); if (!athAsCoach) makeLocalTrack(Prefs.athNoise, Prefs.athWind) }
             "ath_wind" -> { ed.putBoolean(k, s == "true").apply(); if (!athAsCoach) makeLocalTrack(Prefs.athNoise, Prefs.athWind) }
             else -> return

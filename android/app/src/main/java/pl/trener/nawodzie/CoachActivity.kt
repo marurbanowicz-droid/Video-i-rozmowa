@@ -255,7 +255,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         // komunikat o wyciszeniu wszystkiego / rozmowie z jedną osobą – jedyny element nad obrazem, tylko w tych stanach
         muteBanner = text("", 14f, bold = true).apply {
             background = roundBg(Color.parseColor("#E6FF3B30"), dp(14).toFloat()); setPadding(dp(14), dp(8), dp(14), dp(8)); visibility = View.GONE
-            setOnClickListener { if (Engine.fullMute) Engine.toggleFullMute() else Engine.setSolo(null) }
+            setOnClickListener { if (Engine.allMute) Engine.setAllMute(false) else if (Engine.fullMute) Engine.toggleFullMute() else Engine.setSolo(null) }
         }
         root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = (if (landscape) 0 else band) + dp(10) })
 
@@ -451,7 +451,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         val soloName = Engine.soloCid?.let { id -> all.firstOrNull { it.cid == id }?.name }
         muteBanner.visibility = if (Engine.fullMute || soloName != null) View.VISIBLE else View.GONE
-        muteBanner.text = if (Engine.fullMute) "WYCISZONO WSZYSTKO – dotknij, aby przywrócić" else "Mówisz tylko do: $soloName – dotknij, aby mówić do wszystkich"
+        muteBanner.text = if (Engine.allMute) "TRYB PONTON – WYCISZONO WSZYSTKICH – dotknij, aby przywrócić" else if (Engine.fullMute) "WYCISZONO WSZYSTKO – dotknij, aby przywrócić" else "Mówisz tylko do: $soloName – dotknij, aby mówić do wszystkich"
         spkBtn.setImageResource(if (Engine.fullMute) R.drawable.ic_volume_off else if (Prefs.speaker) R.drawable.ic_volume_up else R.drawable.ic_headset)
         shutter.recording = CamRec.recording != null
         updateRecTime()
@@ -519,12 +519,15 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     // ---------------- panel zarządzania pokojem ----------------
     private fun roomPanel() {
         val r = Room(roomCode(), roomName())
+        var dialogRef: androidx.appcompat.app.AlertDialog? = null
         val head = text("", 13f, col(R.color.mut))
         val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val box = column(16).apply {
             gravity = Gravity.START
             addView(head, lp())
             addView(button("Kto kogo słyszy…") { hearDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, lp(top = dp(8)))
+            addView(button(if (Engine.allMute) "Tryb ponton: przywróć dźwięk wszystkim" else "Tryb ponton: wycisz wszystkich") { Engine.toggleAllMute(); dialogRef?.dismiss() }
+                .apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, lp(top = dp(8)))
             if (isHost) addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(button("Zadzwoń…") { callDialog() }.apply { minHeight = dp(44); setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
@@ -617,6 +620,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             .setPositiveButton("Zamknij", null).create()
         dlg.setOnShowListener { Engine.addUi(ui) }
         dlg.setOnDismissListener { Engine.removeUi(ui) }
+        dialogRef = dlg
         dlg.show()
     }
 
@@ -653,7 +657,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     private val GAINS = listOf("1", "2", "3", "4", "6", "8")
     private val MICS = listOf("0.5", "0.75", "1", "1.5", "2", "3", "4")
     private val ACT_NAMES = mapOf("volume" to "Zwykła głośność", "mute_all" to "Wycisz wszystko", "mute_mic" to "Wycisz mikrofon",
-        "ptt" to "Push-to-talk", "record" to "Nagrywanie", "note" to "Notatka głosowa")
+        "ptt" to "Push-to-talk", "record" to "Nagrywanie", "note" to "Notatka głosowa", "mute_everyone" to "Ponton: wycisz wszystkich")
 
     /** Okno sterowania ustawieniami aplikacji wybranego zawodnika (zmiany działają od razu u niego). */
     private fun athleteSettings(cid: String) {
@@ -702,7 +706,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         seek("Wzmocnienie odbieranego głosu", GAINS.size - 1, GAINS.indexOf(st["gain"] ?: "3").coerceAtLeast(0), { GAINS[it] + "×" }) { put("gain", GAINS[it]) }
         seek("Wzmocnienie mikrofonu", MICS.size - 1, MICS.indexOf(st["mic_gain"] ?: "1").coerceAtLeast(0), { MICS[it] + "×" }) { put("mic_gain", MICS[it]) }
         choice("Tryb rozmowy", "talk_mode", listOf("open", "ptt"), { if (it == "ptt") "naciśnij, aby mówić" else "ciągła" }, "open")
-        val acts = if (v.coach) listOf("volume", "mute_all", "mute_mic", "ptt", "record", "note") else listOf("volume", "mute_all", "mute_mic", "ptt")
+        val acts = if (v.coach) listOf("volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone") else listOf("volume", "mute_all", "mute_mic", "ptt")
         choice("Przycisk głośności +", "vol_up", acts, { ACT_NAMES[it] ?: it }, if (v.coach) "mute_all" else "volume")
         choice("Przycisk głośności −", "vol_down", acts, { ACT_NAMES[it] ?: it }, if (v.coach) "record" else "volume")
         choice("Środkowy przycisk słuchawek", "headset_action", acts.drop(1), { ACT_NAMES[it] ?: it }, "mute_all")
