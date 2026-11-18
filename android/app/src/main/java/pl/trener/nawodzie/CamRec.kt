@@ -85,7 +85,8 @@ object CamRec {
     @Volatile var curZoom = 1f; private set
     val sportActive get() = stabFx.isNotEmpty()
     private fun releaseStab() { stabFx.forEach { it.processor.release() }; stabFx = emptyList() }
-    private fun modeSuffix(m: String) = when (m) { "super" -> "_SUPER"; "superh" -> "_SUPERH"; "eis" -> "_EIS"; else -> "" }
+    private fun modeSuffix(m: String) = when (m) { "super" -> "_SUPER"; "superh" -> "_SUPERH"; "eis" -> "_EIS"; else -> "" } +
+        (if ((m == "super" || m == "superh") && Prefs.stabRawCal) "_KALIBRACJA" else "")
 
     // ---------------- zoom wirtualny (tryby SUPER) ----------------
     // Użytkownik ustawia zoom „jak na głównym obiektywie” (E). Aplikacja dobiera zoom aparatu (cz) tak, żeby
@@ -332,6 +333,7 @@ object CamRec {
         val cam = camera ?: return
         val st = cam.cameraInfo.exposureState
         if (!st.isExposureCompensationSupported) return
+        Prefs.evSuperDefault = 2 * evStep()
         val r = st.exposureCompensationRange
         try { cam.cameraControl.setExposureCompensationIndex(Prefs.evIndex.coerceIn(r.lower, r.upper)) } catch (_: Exception) {}
     }
@@ -425,6 +427,7 @@ object CamRec {
         }
         Engine.pcmSink = sink
         recStartedAt = System.currentTimeMillis()
+        Notifier.recCue(true)
         notifyChange()
         return true
     }
@@ -432,6 +435,7 @@ object CamRec {
     /** W trybie Horyzont płynny obraz w nagraniu jest opóźniony – zatrzymujemy chwilę później, żeby nic nie uciąć. */
     fun stopRec() {
         val r = recording ?: return
+        Notifier.recCue(false)
         val d = videoDelayMs
         if (d > 0) mainHandler.postDelayed({ try { r.stop() } catch (_: Exception) {} }, d + 150L)
         else try { r.stop() } catch (_: Exception) {}

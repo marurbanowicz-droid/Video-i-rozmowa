@@ -447,6 +447,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private var B = deviceToBuf(sensorRotation)
     private var BT = mT(B)
     private var imgW = 1440; private var imgH = 1080
+    private val rawCal = Prefs.stabRawCal                      // kalibracja: nagranie bez korekty (ten sam obiektyw i kadr)
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
     private val offsetNs = Prefs.stabTimeMs * 1_000_000L
     private val rsDir = Prefs.stabRs
@@ -799,7 +800,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         if (ringOk) { pushRing(ts, tC, e); emitDelayed(ts, rot, corners); return }
 
         val As = bands(fdNow)
-        val v = if (As != null) (if (videoOnly) videoV(fdNow, As, rot, corners) else previewV(fdNow, As, rot, corners, dt)) else null
+        val v = if (As != null) (if (videoOnly) (if (rawCal) null else videoV(fdNow, As, rot, corners)) else previewV(fdNow, As, rot, corners, dt)) else null
         val hs = homs(As, v, fdNow)
         val prog = progOes ?: return
         for ((so, o) in outputs) {
@@ -906,7 +907,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val idx = (ringStart + pick) % n
         val fd = frameData(ringTs[idx], ringTc[idx], ringE[idx], FrameMeta.find(ringTs[idx]))
         val As = bands(fd)
-        val v = if (As != null) videoV(fd, As, rot, corners) else null
+        val v = if (As != null && !rawCal) videoV(fd, As, rot, corners) else null
         val hs = homs(As, v, fd)
         val p = prog2d ?: return
         for ((so, o) in outputs) {

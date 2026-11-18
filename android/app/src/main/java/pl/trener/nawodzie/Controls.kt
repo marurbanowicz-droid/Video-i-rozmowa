@@ -35,7 +35,6 @@ object Controls {
                 if (isCoach()) {
                     val rec = CamRec.recording != null
                     if (rec) CamRec.stopRec() else CamRec.startRec(app)
-                    Notifier.beep(if (rec) "leave" else "back")
                     SessionService.refresh(app)
                 } else Notifier.toast("Nagrywanie jest dostępne u trenera")
             }

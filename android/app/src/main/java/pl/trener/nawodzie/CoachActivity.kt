@@ -176,8 +176,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
 
         // ---- elementy pasa górnego / lewego ----
         val settingsBtn = iconBtn(R.drawable.ic_settings, 38) { openSettings() }
-        val endBtn = pillText("⏻ Zakończ").apply {
-            setTextColor(Color.parseColor("#FF6B63")); setOnClickListener { confirmEnd() }
+        val endBtn = iconBtn(R.drawable.ic_power, 38) { confirmEnd() }.apply {
+            imageTintList = ColorStateList.valueOf(Color.parseColor("#FF6B63")); contentDescription = "Zakończ sesję"
         }
         qualityPill = pillText("FHD").apply { setOnClickListener { qualityMenu(it) } }
         stabPill = pillText("STAB").apply {
@@ -187,6 +187,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         noiseBtn = iconBtn(R.drawable.ic_noise, 38) { toggleNoise() }
         statusPill = pillText("").apply {
             setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_group, 0, 0, 0); compoundDrawablePadding = dp(6)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
             setOnClickListener { roomPanel() }
         }
         // korekta ekspozycji: − ciemniej, + jaśniej, dotknięcie wartości zeruje
@@ -211,8 +212,10 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 addView(settingsBtn); addView(gap(6)); addView(endBtn)
                 addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
                 addView(qualityPill); addView(gap(6)); addView(stabPill); addView(gap(6)); addView(noiseBtn)
-                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-                addView(statusPill)
+                // pole na pokój zajmuje resztę wiersza; długa nazwa jest skracana „…”, a nie wypycha ikony poza ekran
+                addView(FrameLayout(context).apply {
+                    addView(statusPill, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL))
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
             }
             val row2 = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
