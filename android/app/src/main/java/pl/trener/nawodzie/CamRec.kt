@@ -217,7 +217,8 @@ object CamRec {
                 fMain *= Prefs.stabFScale
                 zR = lensR; zCzMin = czMin
                 eMin = (lensR * czMin * K_MIN).toFloat()
-                eMax = minOf(E_MAX, lensR * czMax * K_NOM).toFloat().coerceAtLeast(eMin)
+                // zoom do 20× niezależnie od zakresu sprzętowego: powyżej niego margines kadru k=e/cz po prostu rośnie
+                eMax = E_MAX.toFloat().coerceAtLeast(eMin)
                 zCzMax = (eMax / (lensR * K_NOM)).toFloat().coerceIn(czMin, czMax)
                 logHeader = listOf("model=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}", "sdk=${android.os.Build.VERSION.SDK_INT}",
                     "mode=$mode", "lens=$superInfo", "fMain=$fMain lensR=$lensR czMin=$czMin czMax=$czMax eMin=$eMin eMax=$eMax",
