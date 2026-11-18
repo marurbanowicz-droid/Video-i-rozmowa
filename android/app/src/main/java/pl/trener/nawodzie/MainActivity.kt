@@ -94,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         if (i?.getBooleanExtra("resume", false) == true && Prefs.session() != null && Engine.role == Engine.Role.NONE) resume()
     }
 
-    private val WEB_URL = "https://marurbanowicz-droid.github.io/video-i-rozmowa/"
+    private val WEB_URL = "https://marurbanowicz-droid.github.io/Video-i-rozmowa/"
 
     private fun buildUi() {
         val root = column(24).apply { gravity = Gravity.CENTER }
