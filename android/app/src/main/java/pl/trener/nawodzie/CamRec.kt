@@ -64,6 +64,32 @@ object CamRec {
     var onChange: (() -> Unit)? = null
 
     private var pendingRebind = false
+
+    // ---------------- usypianie kamery ----------------
+    // Kamera (a w trybach SUPER także przetwarzanie obrazu i żyroskop) nie pracuje, gdy ekranu trenera nie widać
+    // i nic się nie nagrywa. Nagrywanie z przycisków przy zgaszonym ekranie najpierw budzi kamerę (ok. 1 s).
+    @Volatile private var uiVisible = false
+    @Volatile var sleeping = false; private set
+    private var pendingStart: Context? = null
+    private const val SLEEP_MS = 15_000L
+    private val sleepR = Runnable {
+        if (uiVisible || recording != null || pendingStart != null || sleeping) return@Runnable
+        val p = provider ?: return@Runnable
+        sleeping = true
+        try { p.unbindAll() } catch (_: Exception) {}
+        releaseStab()
+        try { overlay?.close() } catch (_: Exception) {}; overlay = null
+        camera = null; preview = null; videoCapture = null
+        notifyChange()
+    }
+    private fun scheduleSleep() { mainHandler.removeCallbacks(sleepR); if (!uiVisible) mainHandler.postDelayed(sleepR, SLEEP_MS) }
+
+    /** Ekran trenera widoczny / schowany. */
+    fun setUiVisible(v: Boolean) = onMain {
+        uiVisible = v
+        mainHandler.removeCallbacks(sleepR)
+        if (v) { if (sleeping) { sleeping = false; rebind() } } else scheduleSleep()
+    }
     private var lastZoomKey = ""
     private var stabFx: List<StabEffect> = emptyList()
     /** Orientacja ekranu (podgląd) i orientacja nagrania (zamrożona na czas nagrywania) – dla trybów Horyzont. */
@@ -136,6 +162,7 @@ object CamRec {
     }
 
     fun unbind() {
+        mainHandler.removeCallbacks(sleepR); sleeping = false; pendingStart = null
         try { recording?.stop() } catch (_: Exception) {}
         provider?.unbindAll()
         releaseStab()
@@ -149,6 +176,7 @@ object CamRec {
         if (recording != null) { pendingRebind = true; return@onMain }
         val p = provider ?: return@onMain
         val o = owner ?: return@onMain
+        sleeping = false
         try {
             p.unbindAll()
             releaseStab()
@@ -286,6 +314,8 @@ object CamRec {
             Log.e(TAG, "bind", e); Notifier.toast("Błąd kamery: ${e.message}")
         }
         notifyChange()
+        pendingStart?.let { c -> pendingStart = null; mainHandler.postDelayed({ if (recording == null) startRec(c) }, 400) }
+        scheduleSleep()
     }
 
     /** Data i godzina małą czcionką w prawym dolnym rogu obrazu (podgląd i nagranie). */
@@ -376,7 +406,14 @@ object CamRec {
 
     @SuppressLint("MissingPermission")
     fun startRec(ctx: Context): Boolean {
-        val vc = videoCapture ?: run { Notifier.toast("Kamera nie jest gotowa"); return false }
+        val vc = videoCapture ?: run {
+            if (sleeping && provider != null && owner != null) {
+                pendingStart = ctx.applicationContext
+                Notifier.toast("Uruchamiam kamerę…")
+                rebind(); return true
+            }
+            Notifier.toast("Kamera nie jest gotowa"); return false
+        }
         if (recording != null) return false
         val app = ctx.applicationContext
         val dir = recDir(app)
@@ -409,6 +446,7 @@ object CamRec {
                             // orientacja mogła się zmienić w trakcie nagrania – następne nagranie ma mieć aktualną
                             try { videoCapture?.targetRotation = rotation } catch (_: Exception) {}
                             if (pendingRebind) { pendingRebind = false; rebind() }
+                            scheduleSleep()
                             if (ev.hasError()) Log.w(TAG, "finalize error ${ev.error}", ev.cause)
                             if (vFile.exists() && vFile.length() > 0) {
                                 saving.incrementAndGet()

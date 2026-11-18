@@ -153,7 +153,7 @@ class StandbyService : Service() {
         retries.remove(id)
         if (!running || !wanted()) return
         lateinit var s: PeerSignal
-        s = PeerSignal(id, object : PeerSignal.Listener {
+        s = PeerSignal(id, heartbeatSec = 25, pingSec = 30, l = object : PeerSignal.Listener {
             override fun onOpen() { backoff[id] = 0 }
             override fun onIdTaken() { /* pokój otwarty na innym urządzeniu – spróbujemy później */ }
             override fun onMessage(type: String, src: String?, payload: JSONObject?) {
