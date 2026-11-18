@@ -94,6 +94,8 @@ class MainActivity : AppCompatActivity() {
         if (i?.getBooleanExtra("resume", false) == true && Prefs.session() != null && Engine.role == Engine.Role.NONE) resume()
     }
 
+    private val WEB_URL = "https://marurbanowicz-droid.github.io/video-i-rozmowa/"
+
     private fun buildUi() {
         val root = column(24).apply { gravity = Gravity.CENTER }
         // ekran startowy
@@ -108,6 +110,16 @@ class MainActivity : AppCompatActivity() {
             updBtn = button("⬆ Aktualizacja", "warn") { Updater.available?.let { showUpdateDialog(it) } }
             updBtn.visibility = View.GONE
             addView(updBtn, lp(top = dp(12)))
+            // link dla zawodników z iPhone'ami (wersja przeglądarkowa) – jedno dotknięcie kopiuje go do schowka
+            addView(column(14).apply {
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(col(R.color.card)); setStroke(dp(1), col(R.color.mut)) }
+                addView(text("📱 Link dla zawodników z iPhone’em", 14f, bold = true))
+                addView(text(WEB_URL, 13f, col(R.color.mut)).apply { setTextIsSelectable(true) }, lp(top = dp(4)))
+                addView(button("Kopiuj link") {
+                    getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("link", WEB_URL))
+                    Notifier.toast("Skopiowano link")
+                }, lp(top = dp(8)))
+            }, lp(top = dp(20)))
             addView(button("Zamknij aplikację", "danger") { AppExit.confirm(this@MainActivity) }, lp(top = dp(24)))
             addView(button("Sprawdź aktualizacje") { forceUpdateCheck() }, lp(top = dp(12)))
             verTxt = text("wersja ${BuildConfig.VERSION_NAME}", 12f, col(R.color.mut)).apply { gravity = Gravity.CENTER }
