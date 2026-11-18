@@ -87,6 +87,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         Engine.addUi(this)
         CamRec.setSurface(preview.surfaceProvider)
         CamRec.setRotation(rot())
+        CamRec.setUiVisible(true)
         try { getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(displayListener, mainHandler) } catch (_: Exception) {}
         mainHandler.post(ticker)
         syncZoom()
@@ -96,6 +97,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         Engine.removeUi(this)
         try { getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) } catch (_: Exception) {}
         CamRec.setSurface(null)
+        CamRec.setUiVisible(false)
         mainHandler.removeCallbacks(ticker)
         super.onStop()
     }
