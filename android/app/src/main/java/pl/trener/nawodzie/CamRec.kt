@@ -93,7 +93,7 @@ object CamRec {
     // zostawić zapas kadru ok. 1,8× na stabilizację: najpierw obiektyw szeroki, przy zbliżeniu główny.
     private const val K_NOM = 1.8
     private const val K_MIN = 1.5
-    private const val E_MAX = 3.0
+    private const val E_MAX = 20.0
     @Volatile var userZoom = 1f; private set
     @Volatile private var superOn = false
     private var zR = 1.0; private var zCzMin = 1f; private var zCzMax = 1f

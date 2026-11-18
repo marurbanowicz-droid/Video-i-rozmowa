@@ -911,7 +911,9 @@ object Engine {
     /** Zmienia ustawienie w aplikacji zawodnika (trener główny – bezpośrednio, drugi trener – przez trenera głównego). */
     fun setAthleteSetting(cid: String, key: String, value: String) = exec.execute {
         if (role == Role.COACH) {
-            dataLinks[cid]?.let { dcSend(it, JSONObject().put("t", "set").put("k", key).put("v", value)) }
+            val dl = dataLinks[cid]
+            if (dl == null || dl.dc?.state() != DataChannel.State.OPEN) Notifier.toast("Brak kanału danych z zawodnikiem – ustawienie nie zostało wysłane")
+            dl?.let { dcSend(it, JSONObject().put("t", "set").put("k", key).put("v", value)) }
             athletes[cid]?.let { it.cfg = it.cfg + (key to value); snapshot(); changed(); broadcastRoster() }
         } else if (role == Role.ATHLETE && athAsCoach) {
             athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", key).put("v", value)) }

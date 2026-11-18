@@ -88,7 +88,7 @@ object Controls {
         val up = direction > 0
         val i = if (up) 0 else 1
         val now = SystemClock.elapsedRealtime()
-        if (now - lastVol[i] < 700) { lastVol[i] = now; return }   // przytrzymanie generuje serię zdarzeń
+        if (now - lastVol[i] < 350) { lastVol[i] = now; return }   // przytrzymanie generuje serię zdarzeń
         lastVol[i] = now
         val a = Prefs.volAction(up, isCoach())
         if (a == "volume") app.getSystemService(AudioManager::class.java)
@@ -104,8 +104,64 @@ object Controls {
         }
     }
 
+    // Słuchawki Bluetooth (np. Sony) zmieniają głośność bezpośrednio w systemie – aplikacja nie dostaje klawiszy głośności.
+    // Wykrywamy zmianę głośności, wykonujemy przypisaną funkcję i przywracamy poprzednią głośność.
+    private val base = HashMap<Int, Int>()
+    private var ignoreUntil = 0L
+    private var volRx: android.content.BroadcastReceiver? = null
+
+    private fun am() = app.getSystemService(AudioManager::class.java)
+    private fun watchedStreams() = setOf(AudioManager.STREAM_VOICE_CALL, AudioManager.STREAM_MUSIC, Vol.stream(app))
+
+    /** Zapamiętuje bieżącą głośność jako punkt odniesienia (wywoływane też po zmianie z ekranu aplikacji). */
+    fun rebase() {
+        if (!::app.isInitialized) return
+        val a = am()
+        for (st in watchedStreams()) try {
+            var v = a.getStreamVolume(st); val mx = a.getStreamMaxVolume(st)
+            // na skrajnych wartościach kolejne naciśnięcie nie zmieniłoby głośności i nie dałoby się go wykryć
+            if (Prefs.volAction(true, isCoach()) != "volume" || Prefs.volAction(false, isCoach()) != "volume") {
+                if (v >= mx && mx > 2) { v = mx - 1; ignoreUntil = SystemClock.elapsedRealtime() + 600; a.setStreamVolume(st, v, 0) }
+                else if (v <= 0 && mx > 2) { v = 1; ignoreUntil = SystemClock.elapsedRealtime() + 600; a.setStreamVolume(st, v, 0) }
+            }
+            base[st] = v
+        } catch (_: Exception) {}
+    }
+
+    private fun onSystemVolume(stream: Int, value: Int) {
+        if (Engine.role == Engine.Role.NONE) return
+        if (stream !in watchedStreams()) return
+        val a = am()
+        val prev = base[stream] ?: run { base[stream] = value; return }
+        if (value == prev) return
+        if (SystemClock.elapsedRealtime() < ignoreUntil) { base[stream] = value; return }
+        val up = value > prev
+        val act = Prefs.volAction(up, isCoach())
+        if (act == "volume") { base[stream] = value; return }
+        // przycisk ma wykonać funkcję, a nie zmienić głośność – przywracamy poprzednią wartość
+        ignoreUntil = SystemClock.elapsedRealtime() + 500
+        try { a.setStreamVolume(stream, prev, 0) } catch (_: Exception) {}
+        volumeFromSession(if (up) 1 else -1)
+    }
+
+    private fun startVolumeWatch() {
+        if (volRx != null) return
+        val rx = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val st = i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
+                val v = i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
+                if (st >= 0 && v >= 0) onSystemVolume(st, v)
+            }
+        }
+        volRx = rx
+        androidx.core.content.ContextCompat.registerReceiver(app, rx, android.content.IntentFilter("android.media.VOLUME_CHANGED_ACTION"),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        rebase()
+    }
+
     fun start(ctx: Context) {
         app = ctx.applicationContext
+        startVolumeWatch()
         if (session != null) return
         val s = MediaSessionCompat(app, "TrenerNaWodzie")
         s.setCallback(object : MediaSessionCompat.Callback() {
@@ -137,6 +193,7 @@ object Controls {
     fun stop() {
         session?.let { it.isActive = false; it.release() }
         session = null
+        volRx?.let { try { app.unregisterReceiver(it) } catch (_: Exception) {} }; volRx = null
     }
 
     /** Krótka cisza odtworzona jako „multimedia” – system kieruje wtedy przyciski słuchawek do tej aplikacji. */
@@ -190,6 +247,7 @@ object Vol {
     /** Zapamiętuje głośność rozmowy ustawioną przez użytkownika – kolejna sesja zaczyna od niej, a nie od maksimum. */
     fun remember(ctx: Context) {
         try { Prefs.voiceVol = am(ctx).getStreamVolume(AudioManager.STREAM_VOICE_CALL) } catch (_: Exception) {}
+        Controls.rebase()
     }
 
     private fun setGain(g: Float) { Prefs.sp.edit().putString("gain", fmt(g)).apply(); Engine.onSettingChanged("gain") }

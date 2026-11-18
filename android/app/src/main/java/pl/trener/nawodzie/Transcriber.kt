@@ -67,38 +67,79 @@ object Transcriber {
         val parts = split(samples)
         val sb = StringBuilder()
         var firstErr: String? = null
+        val trace = ArrayList<String>()
         var offline = true          // najpierw tryb offline; przy braku polskiego pakietu – zwykła usługa mowy (z internetem)
         for ((i, seg) in parts.withIndex()) {
             val f = File(ctx.cacheDir, "stt_$i.pcm")
             try {
                 f.outputStream().use { o -> val b = java.nio.ByteBuffer.allocate(seg.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN); seg.forEach { b.putShort(it) }; o.write(b.array()) }
                 var r = recognize(ctx, f, offline)
+                if (i == 0) trace.add((if (offline) "offline" else "online") + "=" + r.third)
                 if (offline && r.third in LANG_ERRORS) {
-                    if (i == 0) requestPlPack(ctx)
-                    offline = false
-                    r = recognize(ctx, f, false)
+                    // polski pakiet nie jest zainstalowany – pobieramy go i czekamy (do ok. 3 min), potem ponawiamy offline
+                    Notifier.toast("Pobieram polski pakiet rozpoznawania mowy…")
+                    val got = ensurePlPack(ctx)
+                    trace.add("pakiet=" + got)
+                    if (got) { r = recognize(ctx, f, true); trace.add("offline2=" + r.third) }
+                    if (!got || r.third in LANG_ERRORS) {
+                        offline = false
+                        r = recognize(ctx, f, false); trace.add("online=" + r.third)
+                    }
                 }
                 if (r.first != null) { if (sb.isNotEmpty()) sb.append(' '); sb.append(r.first) }
                 else if (r.second != null && firstErr == null) firstErr = r.second
             } finally { f.delete() }
         }
-        return if (sb.isNotBlank()) Result(sb.toString().trim(), null) else Result(null, firstErr ?: "nie rozpoznano mowy")
+        return if (sb.isNotBlank()) Result(sb.toString().trim(), null)
+        else Result(null, (firstErr ?: "nie rozpoznano mowy") + " [" + trace.joinToString(", ") + "]")
     }
 
     private val LANG_ERRORS = setOf(12, 13)   // ERROR_LANGUAGE_NOT_SUPPORTED / ERROR_LANGUAGE_UNAVAILABLE
 
-    /** Prosi telefon o pobranie polskiego pakietu mowy do rozpoznawania offline (przyda się następnym razem). */
-    private fun requestPlPack(ctx: Context) {
-        if (Build.VERSION.SDK_INT < 33) return
+    /**
+     * Sprawdza, czy polski pakiet rozpoznawania mowy jest zainstalowany; jeśli nie – zleca pobranie i czeka.
+     * Zwraca true, gdy pakiet jest gotowy. Fragmenty z pliku przyjmuje wiarygodnie tylko rozpoznawanie w telefonie.
+     */
+    private fun ensurePlPack(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        var started = false
+        for (n in 0 until 60) {
+            val sup = checkPl(ctx) ?: return false           // (zainstalowany, obsługiwany)
+            if (sup.first) return true
+            if (!sup.second) return false
+            if (!started) { started = true; onMain { try { downloadPl(ctx) } catch (_: Throwable) {} } }
+            Thread.sleep(3000)
+        }
+        return false
+    }
+
+    private fun checkPl(ctx: Context): Pair<Boolean, Boolean>? {
+        val out = arrayOfNulls<Pair<Boolean, Boolean>>(1)
+        val done = CountDownLatch(1)
         onMain {
             try {
-                if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) return@onMain
+                if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) { done.countDown(); return@onMain }
                 val sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
-                val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pl-PL")
-                sr.triggerModelDownload(i)
-                mainHandler.postDelayed({ try { sr.destroy() } catch (_: Throwable) {} }, 60_000)
-            } catch (_: Throwable) {}
+                val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                sr.checkRecognitionSupport(i, ctx.mainExecutor, object : android.speech.RecognitionSupportCallback {
+                    override fun onSupportResult(s: android.speech.RecognitionSupport) {
+                        val inst = s.installedOnDeviceLanguages.any { it.startsWith("pl", true) }
+                        val sup = inst || s.supportedOnDeviceLanguages.any { it.startsWith("pl", true) } || s.pendingOnDeviceLanguages.any { it.startsWith("pl", true) }
+                        out[0] = inst to sup; try { sr.destroy() } catch (_: Throwable) {}; done.countDown()
+                    }
+                    override fun onError(error: Int) { try { sr.destroy() } catch (_: Throwable) {}; done.countDown() }
+                })
+            } catch (_: Throwable) { done.countDown() }
         }
+        done.await(10, TimeUnit.SECONDS)
+        return out[0]
+    }
+
+    private fun downloadPl(ctx: Context) {
+        val sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pl-PL")
+        sr.triggerModelDownload(i)
+        mainHandler.postDelayed({ try { sr.destroy() } catch (_: Throwable) {} }, 200_000)
     }
 
     /** Miesza do mono i zmniejsza próbkowanie do 16 kHz (interpolacja liniowa). */

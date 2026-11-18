@@ -329,7 +329,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             rangeKey = key
             dial.setRange(mn, mx)
             presets.removeAllViews()
-            val vals = (listOf(mn) + listOf(1f, 2f, 3f, 5f, 10f, 30f).filter { it > mn + 0.05f && it <= mx + 0.01f }).distinct()
+            val vals = (listOf(mn) + listOf(1f, 2f, 3f, 5f, 10f, 20f, 30f).filter { it > mn + 0.05f && it <= mx + 0.01f }).distinct()
             for (v in vals) {
                 val t = text(fmtZ(v), 12f, bold = true).apply {
                     gravity = Gravity.CENTER; tag = v
@@ -692,10 +692,13 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             }
             show(); box.addView(b, lp(top = dp(8)))
         }
-        sw("Dźwięk z głośnika (wyłączone = słuchawki)", "speaker", false)
+        val web = !v.app && !v.coach
+        if (web) box.addView(text("Zawodnik używa strony (iPhone) – można zdalnie sterować mikrofonem, wyciszeniem i głośnością rozmowy. Pozostałe ustawienia dostępne są tylko w aplikacji.", 12f, col(R.color.mut)), lp())
+        if (!web) sw("Dźwięk z głośnika (wyłączone = słuchawki)", "speaker", false)
         sw("Mikrofon wyciszony", "mute", false)
         sw("Wyciszone wszystko (mikrofon i dźwięk)", "full_mute", false)
         seek("Głośność rozmowy", 10, (st["voice_pct"]?.toIntOrNull() ?: 80) / 10, { "${it * 10}%" }) { put("voice_pct", (it * 10).toString()) }
+        if (web) { MaterialAlertDialogBuilder(this).setTitle(v.name).setView(ScrollView(this).apply { addView(box) }).setPositiveButton("Zamknij", null).show(); return }
         seek("Wzmocnienie odbieranego głosu", GAINS.size - 1, GAINS.indexOf(st["gain"] ?: "3").coerceAtLeast(0), { GAINS[it] + "×" }) { put("gain", GAINS[it]) }
         seek("Wzmocnienie mikrofonu", MICS.size - 1, MICS.indexOf(st["mic_gain"] ?: "1").coerceAtLeast(0), { MICS[it] + "×" }) { put("mic_gain", MICS[it]) }
         choice("Tryb rozmowy", "talk_mode", listOf("open", "ptt"), { if (it == "ptt") "naciśnij, aby mówić" else "ciągła" }, "open")

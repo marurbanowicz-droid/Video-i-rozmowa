@@ -268,7 +268,7 @@
 <script>
 'use strict';
 /* ================= WERSJA I KONFIGURACJA ================= */
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 const CONFIG = {
   peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
@@ -1096,6 +1096,7 @@ function athConnectData() {
 }
 function onCoachData(d) {
   if (!d || typeof d !== 'object') return;
+  if (d.t === 'set') return athRemoteSet(String(d.k), String(d.v));
   if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); for (const m of ath.mesh.values()) applyBitrate(m.call.peerConnection, ath.kbps); }
   // głośność trenera ustawiona przez niego dla tego zawodnika (przeglądarka nie wzmacnia ponad 100%)
   if (d.t === 'vol') { try { $('#athAudio').volume = Math.max(0, Math.min(1, +d.v || 0)); } catch {} }
@@ -1196,9 +1197,15 @@ function athCall() {
   c.on('close', () => { if (ath.call === c) { ath.call = null; setLink(false); } });
   c.on('error', () => { if (ath.call === c) ath.call = null; });
 }
+function athCfg() {
+  let v = 80; try { v = Math.round(($('#athAudio').volume || 0) * 100); } catch {}
+  return { mute: String(!!ath.muted), full_mute: String(!!ath.fullMute), voice_pct: String(v) };
+}
 function athSendStatus() {
-  if (!ath.conn || !ath.conn.open || !navigator.getBattery) return;
-  navigator.getBattery().then(b => { try { ath.conn.send({ t: 'st', bat: Math.round(b.level * 100) }); } catch {} }).catch(() => {});
+  if (!ath.conn || !ath.conn.open) return;
+  const send = bat => { try { ath.conn.send({ t: 'st', bat, cfg: athCfg() }); } catch {} };
+  if (navigator.getBattery) navigator.getBattery().then(b => send(Math.round(b.level * 100))).catch(() => send(-1));
+  else send(-1);   // iPhone (Safari) nie udostępnia baterii
 }
 function athWatchdog(force) {
   if (!ath.active) return;
@@ -1219,11 +1226,25 @@ function athWatchdog(force) {
   if (st === 'disconnected' && Date.now() - ath.badSince > 4000) setLink(false);
   if (Date.now() - ath.badSince > (ath.link ? 8000 : 15000)) { setLink(false); athCall(); }
 }
-$('#athMute').onclick = () => {
-  ath.muted = !ath.muted; if (ath.muteGain) ath.muteGain.gain.value = ath.muted ? 0 : 1;
+function athSetMuted(m) {
+  ath.muted = !!m; if (ath.muteGain) ath.muteGain.gain.value = ath.muted ? 0 : 1;
   $('#athMute').textContent = ath.muted ? '🔇 Mikrofon wyciszony' : '🎙 Mikrofon włączony';
   $('#athMute').classList.toggle('primary', !ath.muted);
-};
+}
+$('#athMute').onclick = () => { athSetMuted(!ath.muted); athSendStatus(); };
+// polecenia trenera: mikrofon, wyciszenie wszystkiego, głośność rozmowy (reszta ustawień dotyczy tylko aplikacji)
+function athRemoteSet(k, v) {
+  if (k === 'mute') athSetMuted(v === 'true');
+  else if (k === 'full_mute') {
+    const on = v === 'true';
+    if (on && !ath.fullMute) ath.muteBeforeFull = ath.muted;
+    ath.fullMute = on;
+    try { $('#athAudio').muted = on; } catch {}
+    athSetMuted(on ? true : !!ath.muteBeforeFull);
+  } else if (k === 'voice_pct') { try { $('#athAudio').volume = Math.max(0, Math.min(1, (+v || 0) / 100)); } catch {} }
+  else return;
+  toast('Trener zmienił Twoje ustawienia'); athSendStatus();
+}
 $('#athUnlock').onclick = () => $('#athAudio').play().then(() => $('#athUnlock').classList.add('hidden')).catch(() => {});
 $('#athLeave').onclick = () => {
   if (!confirm('Rozłączyć się z trenerem?')) return;
