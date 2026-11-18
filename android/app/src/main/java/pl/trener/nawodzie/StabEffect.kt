@@ -449,7 +449,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private var imgW = 1440; private var imgH = 1080
     private val rawCal = Prefs.stabRawCal                      // kalibracja: nagranie bez korekty (ten sam obiektyw i kadr)
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
-    private val offsetNs = Prefs.stabTimeMs * 1_000_000L
+    // kalibracja z nagrania 18.11 (Galaxy S24 FE, obiektyw szeroki): przesunięcie czasu +2,5 ms, ogniskowa ×1,05
+    private val calDev = android.os.Build.MODEL.startsWith("SM-S721")
+    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 2_500_000L else 0L)
+    private val wideCalF = if (calDev) 1.05 else 1.0
     private val rsDir = Prefs.stabRs
     private val invert = Prefs.stabInvert
     private val watermark = Prefs.watermark
@@ -618,7 +621,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         if (lo < 0.7) c *= lo * 4.0 / 3.0
         val tMid = tC + exp / 2 + skew / 2
         val tb = LongArray(NB) { i -> tMid + (skew * c * (i.toDouble() / (NB - 1) - 0.5)).toLong() }
-        val f = fMain * lensR * cz * max(inW, inH)
+        val f = fMain * lensR * cz * max(inW, inH) * (if (lensR > 0.999 && cz < 0.999) wideCalF else 1.0)
         val k = max(1.0, e / (lensR * cz))
         return Fd(tb, tMid, f, k, exp, skew, cz, e, m?.phys)
     }
