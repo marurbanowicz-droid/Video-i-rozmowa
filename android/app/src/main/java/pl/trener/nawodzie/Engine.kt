@@ -81,7 +81,7 @@ object Engine {
     data class AthleteView(val cid: String, val name: String, val status: String, val muted: Boolean,
                            val sendOn: Boolean = true, val recvVol: Float = 1f, val sendVol: Float = 1f,
                            val battery: Int = -1, val rttMs: Int = -1, val lossPct: Int = -1, val app: Boolean = false,
-                           val coach: Boolean = false, val cfg: Map<String, String> = emptyMap())
+                           val coach: Boolean = false, val cfg: Map<String, String> = emptyMap(), val diag: String = "")
     /** Rozmowa z jednym zawodnikiem: gdy ustawione, głos trenera idzie tylko do niego. */
     @Volatile var soloCid: String? = null; private set
     @Volatile var athletesView: List<AthleteView> = emptyList(); private set
@@ -133,6 +133,8 @@ object Engine {
         val created = System.currentTimeMillis()
         var mesh = false
         var remote: AudioTrack? = null
+        val rc = IntArray(4)   // kandydaci zdalni: host, mDNS (.local), srflx, relay
+        fun diag(): String = "ICE ${ice.name.lowercase()}, kandydaci: host ${rc[0]}, mdns ${rc[1]}, stun ${rc[2]}, relay ${rc[3]}"
     }
     private val links = HashMap<String, Link>()
     private val closedBytes = LongArray(2)
@@ -428,6 +430,14 @@ object Engine {
                 val l = links[p?.optString("connectionId")] ?: return
                 val c = p?.optJSONObject("candidate") ?: return
                 val ic = IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate"))
+                val cs = ic.sdp
+                when {
+                    cs.contains(" typ relay") -> l.rc[3]++
+                    cs.contains(" typ srflx") -> l.rc[2]++
+                    cs.contains(".local ") -> l.rc[1]++
+                    else -> l.rc[0]++
+                }
+                if (role == Role.COACH && l.type == "media") { snapshot(); changed() }
                 if (l.remoteSet) l.pc?.addIceCandidate(ic) else l.cands.add(ic)
             }
             "EXPIRE" -> if (role == Role.COACH && src != null && src.startsWith("tnw-a-")) {
@@ -573,6 +583,7 @@ object Engine {
                         l.ice == IceConnectionState.FAILED || l.ice == IceConnectionState.CLOSED -> goOffline(a)
                         else -> if (a.badSince == 0L) a.badSince = now()
                     }
+                    snapshot(); changed()
                 } else if (l.ice == IceConnectionState.FAILED || l.ice == IceConnectionState.CLOSED) {
                     dataLinks.entries.removeAll { it.value === l }; closeLink(l)
                 }
@@ -794,7 +805,8 @@ object Engine {
         if (soloCid != null && athletes[soloCid]?.status != "online") { soloCid = null; athletes.values.forEach { applySend(it) } }
         athletesView = athletes.values.map {
             AthleteView(it.cid, it.name, it.status, it.muted, it.sendOn, it.recvVol, it.sendVol, it.battery,
-                it.media?.rttMs ?: -1, it.media?.lossPct ?: -1, it.app, it.coach, it.cfg)
+                it.media?.rttMs ?: -1, it.media?.lossPct ?: -1, it.app, it.coach, it.cfg,
+                if (it.status == "online") "" else it.media?.diag() ?: "")
         }
     }
 

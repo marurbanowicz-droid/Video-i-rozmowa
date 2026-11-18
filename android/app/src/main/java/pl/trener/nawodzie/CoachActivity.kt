@@ -599,7 +599,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
                 val st = when (a.status) { "online" -> "połączony"; "offline" -> "brak połączenia – ponawianie"; else -> "łączenie…" }
                 val q = if (a.status == "online" && a.rttMs >= 0) " · opóźnienie ${a.rttMs} ms" + (if (a.lossPct >= 0) ", straty ${a.lossPct}%" else "") else ""
                 val bat = if (a.battery >= 0) " · bateria ${a.battery}%" else ""
-                row.info.text = st + q + bat + if (a.app) "" else " · strona"
+                row.info.text = st + q + bat + (if (a.app) "" else " · strona") + (if (a.diag.isNotEmpty()) "\n" + a.diag else "")
                 row.info.setTextColor(if (a.status == "online" && (a.lossPct > 8 || a.rttMs > 600 || a.battery in 0..15)) ACCENT else col(R.color.mut))
                 row.send.setImageResource(if (a.sendOn) R.drawable.ic_mic else R.drawable.ic_mic_off)
                 row.send.imageTintList = ColorStateList.valueOf(if (a.sendOn) Color.WHITE else 0xFFFF453A.toInt())
