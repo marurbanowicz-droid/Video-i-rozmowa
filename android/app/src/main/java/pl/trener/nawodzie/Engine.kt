@@ -235,7 +235,7 @@ object Engine {
     }
 
     fun stop(done: (() -> Unit)? = null) = exec.execute {
-        if (role == Role.ATHLETE) athData?.let { dcSend(it, JSONObject().put("t", "bye")) }
+        if (role == Role.ATHLETE) athChan()?.let { dcSend(it, JSONObject().put("t", "bye")) }
         exec.schedule(Runnable { safe { teardown() }; done?.let { onMain(it) } }, 300, TimeUnit.MILLISECONDS)
     }
 
@@ -333,6 +333,19 @@ object Engine {
                 createSdp(b, false) { ans -> setRemote(a, ans) {} }
             }
         }
+    }
+
+    /** Pobiera dane TURN w tle; niezestawione połączenia z innymi zawodnikami zostaną nawiązane od nowa już z TURN. */
+    private fun refreshIce() {
+        Thread {
+            val l = try { buildIce() } catch (_: Exception) { return@Thread }
+            exec.execute { safe {
+                if (role == Role.NONE) return@safe
+                ice = l
+                for (m in mesh.values.toList()) if (!isUp(m)) dropMesh(m)
+                updateMesh()
+            } }
+        }.start()
     }
 
     private fun buildIce(): List<PeerConnection.IceServer> {
@@ -610,12 +623,12 @@ object Engine {
 
     private fun onDcState(l: Link, st: DataChannel.State) {
         if (st == DataChannel.State.OPEN) {
-            if (role == Role.COACH && l.type == "data") {
-                dcSend(l, rosterMsg()); dcSend(l, JSONObject().put("t", "cfg").put("kbps", Prefs.kbps))
-                if (allMute) dcSend(l, JSONObject().put("t", "set").put("k", "full_mute").put("v", "true"))
-                athletes[l.cid]?.let { dcSend(l, JSONObject().put("t", "vol").put("v", it.sendVol.toDouble())) }
-            }
-            if (role == Role.ATHLETE && l === athData) sendStatus()
+            if (role == Role.COACH && l.type == "data") sendInit(l)
+            // zapasowo: zawodnik z aplikacją bez działającego połączenia danych dostaje wszystko kanałem rozmowy
+            if (role == Role.COACH && l.type == "media" && !isOpen(dataLinks[l.cid ?: ""])) exec.schedule(Runnable {
+                safe { val a = athletes[l.cid]; if (!l.closed && a?.app == true && a.media === l && !isOpen(dataLinks[a.cid])) sendInit(l) }
+            }, 1500, TimeUnit.MILLISECONDS)
+            if (role == Role.ATHLETE && (l === athData || l === athMedia)) sendStatus()
         } else if (st == DataChannel.State.CLOSED) {
             remoteClosed(l)
         }
@@ -657,7 +670,7 @@ object Engine {
                 // drugi trener steruje zawodnikiem przez trenera głównego
                 "fwd" -> if (athletes[l.cid]?.coach == true) {
                     val tgt = o.optString("cid")
-                    dataLinks[tgt]?.let { dcSend(it, JSONObject().put("t", "set").put("k", o.optString("k")).put("v", o.optString("v"))) }
+                    sendTo(tgt, JSONObject().put("t", "set").put("k", o.optString("k")).put("v", o.optString("v")))
                 }
             }
             Role.ATHLETE -> onCoachData(o, l)
@@ -713,7 +726,7 @@ object Engine {
         val targets = if (role == Role.COACH) athletes.values.filter { it.status == "online" }.map { it.cid }
                       else athRoster.filter { it.on && it.id != Prefs.cid }.map { it.id }
         targets.forEach { setAthleteSetting(it, "full_mute", on.toString()) }
-        Notifier.beep(if (on) "leave" else "join")
+        Notifier.beep(if (on) "ponton_on" else "ponton_off")
         Notifier.toast(if (on) "Tryb ponton: wyciszono wszystkich" else "Tryb ponton wyłączony – dźwięk przywrócony")
         changed(); if (role == Role.ATHLETE) sendStatus()
     }
@@ -814,7 +827,24 @@ object Engine {
         return JSONObject().put("t", "roster").put("block", blk).put("room", r.name).put("code", r.code).put("cross", Prefs.crosstalk).put("list", list)
     }
 
-    private fun broadcast(o: JSONObject) = dataLinks.values.forEach { dcSend(it, o) }
+    private fun isOpen(l: Link?) = l?.dc?.state() == DataChannel.State.OPEN
+    /** Kanał do zawodnika: osobne połączenie danych, a gdy go nie ma – kanał z połączenia głosowego (tylko aplikacja). */
+    private fun chanTo(cid: String): Link? {
+        dataLinks[cid]?.takeIf { isOpen(it) }?.let { return it }
+        val a = athletes[cid] ?: return null
+        return a.media?.takeIf { a.app && isOpen(it) }
+    }
+    private fun sendTo(cid: String, o: JSONObject): Boolean { val l = chanTo(cid) ?: return false; dcSend(l, o); return true }
+    private fun broadcast(o: JSONObject) = (dataLinks.keys + athletes.keys).forEach { sendTo(it, o) }
+    /** Zawodnik → trener: połączenie danych, a w zapasie kanał połączenia głosowego. */
+    private fun athChan(): Link? = athData?.takeIf { isOpen(it) } ?: athMedia?.takeIf { isOpen(it) }
+    private fun cfgMsg() = JSONObject().put("t", "cfg").put("kbps", Prefs.kbps).put("turn", Prefs.turnUrl)
+    /** Pierwsze wiadomości do zawodnika po otwarciu kanału. */
+    private fun sendInit(l: Link) {
+        dcSend(l, rosterMsg()); dcSend(l, cfgMsg())
+        if (allMute) dcSend(l, JSONObject().put("t", "set").put("k", "full_mute").put("v", "true"))
+        athletes[l.cid]?.let { dcSend(l, JSONObject().put("t", "vol").put("v", it.sendVol.toDouble())) }
+    }
     private fun broadcastRoster() { if (role == Role.COACH) broadcast(rosterMsg()) }
 
     private fun snapshot() {
@@ -866,12 +896,12 @@ object Engine {
     fun setAthleteSendVol(cid: String, v: Float) = exec.execute {
         if (role == Role.ATHLETE && athAsCoach) {
             val x = v.coerceIn(0f, 2f); Prefs.setAthSendVol(cid, x)
-            athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", x.toString())) }
+            athChan()?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", x.toString())) }
             snapshotCo(); changed(); return@execute
         }
         val a = athletes[cid] ?: return@execute
         a.sendVol = v.coerceIn(0f, 2f); Prefs.setAthSendVol(cid, a.sendVol)
-        dataLinks[cid]?.let { dcSend(it, JSONObject().put("t", "vol").put("v", a.sendVol.toDouble())) }
+        sendTo(cid, JSONObject().put("t", "vol").put("v", a.sendVol.toDouble()))
         snapshot(); changed()
     }
     /** Rozmowa tylko z jednym zawodnikiem (null = znów do wszystkich). */
@@ -921,18 +951,22 @@ object Engine {
     /** Ustawia, czy [l] słyszy [s] (trener główny – od razu, drugi trener – przez trenera głównego). */
     fun setHears(l: String, s: String, h: Boolean) = exec.execute {
         if (role == Role.COACH) applyHears(l, s, h)
-        else if (role == Role.ATHLETE && athAsCoach) athData?.let { dcSend(it, JSONObject().put("t", "blk").put("l", l).put("s", s).put("on", h)) }
+        else if (role == Role.ATHLETE && athAsCoach) athChan()?.let { dcSend(it, JSONObject().put("t", "blk").put("l", l).put("s", s).put("on", h)) }
     }
 
     /** Zmienia ustawienie w aplikacji zawodnika (trener główny – bezpośrednio, drugi trener – przez trenera głównego). */
     fun setAthleteSetting(cid: String, key: String, value: String) = exec.execute {
         if (role == Role.COACH) {
-            val dl = dataLinks[cid]
-            if (dl == null || dl.dc?.state() != DataChannel.State.OPEN) Notifier.toast("Brak kanału danych z zawodnikiem – ustawienie nie zostało wysłane")
-            dl?.let { dcSend(it, JSONObject().put("t", "set").put("k", key).put("v", value)) }
+            if (!sendTo(cid, JSONObject().put("t", "set").put("k", key).put("v", value))) {
+                val dl = dataLinks[cid]
+                val why = if (dl == null) "zawodnik nie otworzył połączenia danych"
+                          else "połączenie danych: ${dl.ice.name.lowercase()}, kanał: ${dl.dc?.state()?.name?.lowercase() ?: "brak"}"
+                Notifier.toast("Brak kanału danych z zawodnikiem – ustawienie nie zostało wysłane ($why)")
+            }
             athletes[cid]?.let { it.cfg = it.cfg + (key to value); snapshot(); changed(); broadcastRoster() }
         } else if (role == Role.ATHLETE && athAsCoach) {
-            athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", key).put("v", value)) }
+            athChan()?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", key).put("v", value)) }
+                ?: Notifier.toast("Brak kanału danych z trenerem głównym – ustawienie nie zostało wysłane")
         }
     }
 
@@ -1003,7 +1037,7 @@ object Engine {
 
     /** Zawodnik wysyła trenerowi poziom baterii (widoczny w panelu pokoju). */
     private fun sendStatus() {
-        val l = athData ?: return
+        val l = athChan() ?: return
         val bat = try { app.getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) } catch (_: Exception) { -1 }
         dcSend(l, JSONObject().put("t", "st").put("bat", bat).put("cfg", currentCfg()))
     }
@@ -1028,7 +1062,7 @@ object Engine {
     private fun applyRemoteSetting(k: String, s: String) {
         if (k.startsWith("cvol_")) { s.toFloatOrNull()?.let { coachVols[k.removePrefix("cvol_")] = it.coerceIn(0f, 3f); applyRemote() }; return }
         val ed = Prefs.sp.edit()
-        val actions = setOf("volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone")
+        val actions = setOf("none", "volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone")
         when (k) {
             "speaker" -> { Prefs.speaker = s == "true"; onMain { AudioRouter.apply() } }
             "mute" -> { athMuted = s == "true"; micOn = !athMuted; applyLocal() }
@@ -1060,7 +1094,9 @@ object Engine {
         if (signalOpen) {
             val dataOk = athData?.dc?.state() == DataChannel.State.OPEN
             val mayCall = now() >= athNextCall
-            if (!dataOk && now() - athDataT > 8000 && mayCall) athConnectData()
+            val d = athData
+            val dataStuck = d == null || d.ice == IceConnectionState.FAILED || d.ice == IceConnectionState.CLOSED || now() - athDataT > 25_000
+            if (!dataOk && dataStuck && mayCall) athConnectData()
             if (m == null) { if (mayCall) athCall(); return }
         }
         if (m == null) { setLink(false); return }
@@ -1089,8 +1125,13 @@ object Engine {
 
     private fun onCoachData(o: JSONObject, l: Link) {
         when (o.optString("t")) {
-            "set" -> if (l === athData) applyRemoteSetting(o.optString("k"), o.optString("v"))
-            "cfg" -> { athKbps = o.optInt("kbps", 32); applyBitrate(athMedia?.pc, athKbps) }
+            "set" -> if (l === athData || l === athMedia) applyRemoteSetting(o.optString("k"), o.optString("v"))
+            "cfg" -> {
+                athKbps = o.optInt("kbps", 32); applyBitrate(athMedia?.pc, athKbps)
+                // adres TURN od trenera: bez niego połączenia zawodnik ↔ zawodnik w sieci komórkowej zwykle się nie zestawiają
+                val t = o.optString("turn")
+                if (t.isNotEmpty() && t != Prefs.turnUrl) { Prefs.sp.edit().putString("turn_url", t).apply(); refreshIce() }
+            }
             "vol" -> { athCoachVol = o.optDouble("v", 1.0).toFloat().coerceIn(0f, 3f); applyRemote() }
             "roster" -> {
                 athRoomName = o.optString("room")
@@ -1149,7 +1190,7 @@ object Engine {
         // głośność mojego głosu u poszczególnych osób – wysyłamy po nawiązaniu połączenia
         for ((cid, l) in mesh) if (isUp(l) && coVolSent.add(l.connId)) {
             val v = Prefs.athSendVol(cid)
-            if (v != 1f) athData?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", v.toString())) }
+            if (v != 1f) athChan()?.let { dcSend(it, JSONObject().put("t", "fwd").put("cid", cid).put("k", "cvol_" + Prefs.cid).put("v", v.toString())) }
         }
     }
 
@@ -1225,9 +1266,9 @@ object Engine {
             "ath_noise", "ath_wind" -> if (role == Role.ATHLETE && !athAsCoach) makeLocalTrack(Prefs.athNoise, Prefs.athWind)
             "kbps" -> if (role == Role.COACH) {
                 athletes.values.forEach { applyBitrate(it.media?.pc, Prefs.kbps) }
-                broadcast(JSONObject().put("t", "cfg").put("kbps", Prefs.kbps))
+                broadcast(cfgMsg())
             }
-            "turn_url" -> if (role != Role.NONE) ice = buildIce()
+            "turn_url" -> if (role != Role.NONE) { ice = buildIce(); if (role == Role.COACH) broadcast(cfgMsg()) }
             "crosstalk" -> broadcastRoster()
             "talk_mode" -> { pttActive = false; applyLocal(); changed() }
             "gain" -> applyRemote()

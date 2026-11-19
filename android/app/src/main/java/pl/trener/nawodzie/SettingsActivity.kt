@@ -94,7 +94,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop", "Ponton: wycisz wszystkich")
                    else arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk")
         val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone") else arrayOf("mute_all", "mute_mic", "ptt")
-        talk.list("headset_action", "Środkowy przycisk słuchawek", acts, actVals, "mute_all")
+        talk.list("headset_action", "Środkowy przycisk słuchawek", acts + "Nic (tylko przywróć dźwięk)", actVals + "none", "mute_all")
         talk.list("vol_up", "Przycisk głośności +", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, "mute_all")
         talk.list("vol_down", "Przycisk głośności −", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, if (coach) "record" else "volume")
         talk.action("Jak działają przyciski", "Działają też przy zgaszonym ekranie. Push-to-talk: przytrzymaj, aby mówić; w słuchawkach Bluetooth – kliknij, aby zacząć i kliknij ponownie, aby skończyć.") {}
@@ -149,6 +149,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val appCat = cat("Aplikacja", "app")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
+        appCat.action("Zużycie procesora (diagnostyka)", "Które części aplikacji pracują najwięcej – pomaga znaleźć przyczynę rozładowywania baterii") { showCpu() }
         appCat.action("Aktualizacja zachowuje dane", "Pokoje, ustawienia i nagrania zostają. Trwająca sesja wznawia się jednym dotknięciem po instalacji.") {}
         appCat.action("Zamknij aplikację", "Kończy sesję, wyłącza działanie w tle i powiadomienie – do następnego otwarcia aplikacji") {
             activity?.let { AppExit.confirm(it) }
@@ -182,6 +183,20 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             for ((c, id) in cats) if (id != sec) screen.removePreference(c)
         }
         refreshDynamic()
+    }
+
+    private fun showCpu() {
+        val ctx = requireContext()
+        val txt = CpuDiag.report()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle("Zużycie procesora")
+            .setMessage(txt + "\nZrób zrzut ekranu albo skopiuj i wyślij. „Zeruj” zaczyna liczenie od teraz – zrób to na początku sesji.")
+            .setPositiveButton("Kopiuj") { _, _ ->
+                ctx.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("cpu", txt))
+                Notifier.toast("Skopiowano")
+            }
+            .setNeutralButton("Zeruj") { _, _ -> CpuDiag.reset(); Notifier.toast("Liczenie od teraz") }
+            .setNegativeButton("Zamknij", null).show()
     }
 
     private fun checkUpdate() {

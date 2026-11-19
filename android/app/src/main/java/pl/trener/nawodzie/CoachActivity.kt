@@ -658,7 +658,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
     // ---------------- zdalne ustawienia zawodnika ----------------
     private val GAINS = listOf("1", "2", "3", "4", "6", "8")
     private val MICS = listOf("0.5", "0.75", "1", "1.5", "2", "3", "4")
-    private val ACT_NAMES = mapOf("volume" to "Zwykła głośność", "mute_all" to "Wycisz wszystko", "mute_mic" to "Wycisz mikrofon",
+    private val ACT_NAMES = mapOf("none" to "Nic", "volume" to "Zwykła głośność", "mute_all" to "Wycisz wszystko", "mute_mic" to "Wycisz mikrofon",
         "ptt" to "Push-to-talk", "record" to "Nagrywanie", "note" to "Notatka głosowa", "mute_everyone" to "Ponton: wycisz wszystkich")
 
     /** Okno sterowania ustawieniami aplikacji wybranego zawodnika (zmiany działają od razu u niego). */

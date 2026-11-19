@@ -268,7 +268,7 @@
 <script>
 'use strict';
 /* ================= WERSJA I KONFIGURACJA ================= */
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.3.1';
 const CONFIG = {
   peerPrefix: 'trener-na-wodzie-v1-',          // NIE zmieniaj – od tego zależą zapisane pokoje i linki
   iceServers: [
@@ -767,7 +767,7 @@ function onAthleteConn(conn) {
   conn.on('open', () => {
     const old = coach.conns.get(cid); if (old && old !== conn) try { old.close(); } catch {}
     coach.conns.set(cid, conn);
-    try { conn.send(rosterMsg()); conn.send({ t: 'cfg', kbps: S.kbps }); } catch {}
+    try { conn.send(rosterMsg()); conn.send({ t: 'cfg', kbps: S.kbps, turn: LS.get('turnUrl', '') }); } catch {}
   });
   conn.on('data', d => {
     if (d && d.t === 'bye') { const a = coach.athletes.get(cid); if (a) { Notif.event('leave', `${a.name} rozłącza się`); dropAthlete(cid, false); broadcastRoster(); } }
@@ -1016,7 +1016,7 @@ $('#stabRoll').onchange = e => { S.stabRoll = e.target.checked; saveS(); };
 $('#kbpsSel').onchange = e => {
   S.kbps = +e.target.value; saveS();
   for (const a of coach.athletes.values()) if (a.call) applyBitrate(a.call.peerConnection, S.kbps);
-  broadcast({ t: 'cfg', kbps: S.kbps }); toast('Jakość rozmowy: ' + S.kbps + ' kb/s');
+  broadcast({ t: 'cfg', kbps: S.kbps, turn: LS.get('turnUrl', '') }); toast('Jakość rozmowy: ' + S.kbps + ' kb/s');
 };
 for (const k of ['nSound', 'nText', 'nVoice']) $('#' + k).onchange = e => { S[k] = e.target.checked; saveS(); if (e.target.checked && k === 'nSound') Notif.beep('ok'); if (e.target.checked && k === 'nVoice') Notif.say('Komunikaty głosowe włączone'); };
 $('#btnSaveTurn').onclick = async () => { LS.set('turnUrl', $('#turnUrl').value.trim()); coach.ice = await getIceServers(); toast('Zapisano. Wyślij zawodnikom nowy link z „Zaproś”.'); };
@@ -1097,7 +1097,18 @@ function athConnectData() {
 function onCoachData(d) {
   if (!d || typeof d !== 'object') return;
   if (d.t === 'set') return athRemoteSet(String(d.k), String(d.v));
-  if (d.t === 'cfg') { ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); for (const m of ath.mesh.values()) applyBitrate(m.call.peerConnection, ath.kbps); }
+  if (d.t === 'cfg') {
+    ath.kbps = d.kbps || 32; if (ath.call) applyBitrate(ath.call.peerConnection, ath.kbps); for (const m of ath.mesh.values()) applyBitrate(m.call.peerConnection, ath.kbps);
+    // adres TURN od trenera – bez niego połączenia z innymi zawodnikami w sieci komórkowej zwykle się nie zestawiają
+    if (d.turn && d.turn !== LS.get('turnUrl', '')) {
+      LS.set('turnUrl', d.turn);
+      getIceServers().then(list => {
+        ath.ice = list; try { if (ath.peer && ath.peer.options) ath.peer.options.config = { iceServers: list }; } catch {}
+        for (const [cid, m] of [...ath.mesh]) if (!meshIsUp(m)) closeMesh(cid);
+        updateMesh();
+      });
+    }
+  }
   // głośność trenera ustawiona przez niego dla tego zawodnika (przeglądarka nie wzmacnia ponad 100%)
   if (d.t === 'vol') { try { $('#athAudio').volume = Math.max(0, Math.min(1, +d.v || 0)); } catch {} }
   if (d.t === 'roster') {
@@ -1216,7 +1227,7 @@ function athWatchdog(force) {
   if (!p || p.destroyed) return athConnectPeer();
   if (p.disconnected) { try { p.reconnect(); } catch { p.destroy(); } return; }
   if (!p.open) return;
-  if ((!ath.conn || !ath.conn.open) && Date.now() - ath.connT > 6000) athConnectData();
+  if ((!ath.conn || !ath.conn.open) && Date.now() - ath.connT > 20000) athConnectData();   // zestawienie przez TURN w sieci komórkowej trwa czasem kilkanaście sekund
   const c = ath.call;
   if (!c) return athCall();
   const st = c.peerConnection && c.peerConnection.iceConnectionState;

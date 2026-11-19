@@ -26,6 +26,11 @@ object Controls {
 
     fun run(action: String, down: Boolean, holdCapable: Boolean) {
         if (Engine.role == Engine.Role.NONE) return
+        // przy „wycisz wszystko” przycisk mikrofonu / mówienia najpierw przywraca dźwięk – inaczej wyglądałby na niedziałający
+        if (down && (action == "mute_mic" || action == "ptt") && Engine.fullMute) {
+            if (Engine.allMute && isCoach()) Engine.setAllMute(false) else Engine.toggleFullMute()
+            return
+        }
         when (action) {
             "mute_all" -> if (down) Engine.toggleFullMute()
             "mute_everyone" -> if (down) { if (isCoach()) Engine.toggleAllMute() else Notifier.toast("Tryb ponton jest dostępny na ekranie trenera") }
@@ -79,9 +84,15 @@ object Controls {
         if (ev.repeatCount > 0) return
         when (ev.action) {
             KeyEvent.ACTION_DOWN -> run(Prefs.headsetAction, true, true)
-            KeyEvent.ACTION_UP -> run(Prefs.headsetAction, false, true)
+            KeyEvent.ACTION_UP -> { run(Prefs.headsetAction, false, true); reclaimSoon() }
         }
     }
+
+    // Po naciśnięciu przycisku system może oddać kolejne naciśnięcia innej aplikacji z muzyką – odbieramy je z powrotem.
+    private val reclaimR = Runnable { if (Engine.role != Engine.Role.NONE) claimMediaButtons() }
+    private fun reclaimSoon() { mainHandler.removeCallbacks(reclaimR); mainHandler.postDelayed(reclaimR, 900) }
+    /** Wywoływane po przywróceniu dźwięku do słuchawek. */
+    fun reclaim() = onMain { reclaimSoon() }
 
     /** Klawisze głośności przy zgaszonym ekranie / w tle (przez sesję multimediów). */
     private fun volumeFromSession(direction: Int) {
