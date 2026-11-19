@@ -149,6 +149,50 @@ object AudioRouter {
     // Słuchawki Bluetooth potrafią same rozłączyć kanał rozmowy (np. środkowym przyciskiem – „zakończ połączenie”).
     // Sprawdzamy co kilka sekund i po każdej zmianie, czy dźwięk idzie tam, gdzie powinien, i w razie potrzeby przywracamy.
     private var devListener: Any? = null
+    private var scoRx: android.content.BroadcastReceiver? = null
+    private var appCtx: Context? = null
+    @Volatile private var selfUntil = 0L   // zmiany kanału wywołane przez aplikację – nie są naciśnięciem przycisku
+    private var lastPress = 0L
+
+    /**
+     * Słuchawki Bluetooth w trybie rozmowy wysyłają środkowym przyciskiem polecenie „zakończ połączenie” – system
+     * rozłącza wtedy kanał dźwięku do słuchawek (aplikacja nie dostaje zwykłego klawisza). Wykrywamy to rozłączenie:
+     * przywracamy dźwięk i wykonujemy funkcję środkowego przycisku.
+     */
+    private fun onScoState(state: Int) {
+        val a = am ?: return
+        if (state != AudioManager.SCO_AUDIO_STATE_DISCONNECTED) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now < selfUntil) return
+        if (Build.VERSION.SDK_INT < 31) return
+        // po chwili sprawdzamy, czy słuchawki nadal są podłączone – wyłączenie słuchawek to nie naciśnięcie przycisku
+        mainHandler.postDelayed({
+            val ok = try {
+                val b = am
+                b != null && b.mode == AudioManager.MODE_IN_COMMUNICATION &&   // nie w zwykłej rozmowie telefonicznej
+                    target(b)?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO    // nie głośnik / przewodowe – wtedy rozłączenie jest zamierzone
+            } catch (_: Exception) { false }
+            if (ok) {
+                val t = android.os.SystemClock.elapsedRealtime()
+                if (t - lastPress > 1200) { lastPress = t; Controls.run(Prefs.headsetAction, true, false) }
+                restoreSco()
+            }
+        }, 700)
+    }
+
+    private fun restoreSco() {
+        val a = am ?: return
+        if (Build.VERSION.SDK_INT < 31) return
+        selfUntil = android.os.SystemClock.elapsedRealtime() + 2500
+        try {
+            if (a.mode == AudioManager.MODE_NORMAL) a.mode = AudioManager.MODE_IN_COMMUNICATION
+            a.clearCommunicationDevice()
+        } catch (_: Exception) {}
+        mainHandler.postDelayed({
+            try { target(am ?: return@postDelayed)?.let { am?.setCommunicationDevice(it) } } catch (_: Exception) {}
+            Controls.rebase(); Controls.reclaim()
+        }, 300)
+    }
     private var lastFix = 0L
     private val checkR = object : Runnable { override fun run() { verify(); mainHandler.postDelayed(this, 4000) } }
 
@@ -174,6 +218,7 @@ object AudioRouter {
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastFix < 1500) return
                 lastFix = now
+                selfUntil = now + 2500
                 if (mode == AudioManager.MODE_NORMAL) a.mode = AudioManager.MODE_IN_COMMUNICATION
                 a.setCommunicationDevice(want)
                 Controls.rebase(); Controls.reclaim()
@@ -219,12 +264,23 @@ object AudioRouter {
             a.addOnCommunicationDeviceChangedListener(androidx.core.content.ContextCompat.getMainExecutor(ctx), l); devListener = l
         } catch (_: Exception) {}
         mainHandler.removeCallbacks(checkR); mainHandler.postDelayed(checkR, 4000)
+        appCtx = ctx.applicationContext
+        val rx = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: android.content.Intent) {
+                onScoState(i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1))
+            }
+        }
+        scoRx = rx
+        selfUntil = android.os.SystemClock.elapsedRealtime() + 3000
+        try { androidx.core.content.ContextCompat.registerReceiver(ctx.applicationContext, rx,
+            android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED), androidx.core.content.ContextCompat.RECEIVER_EXPORTED) } catch (_: Exception) {}
     }
 
     fun stop() {
         val a = am ?: return
         cb?.let { a.unregisterAudioDeviceCallback(it) }; cb = null
         mainHandler.removeCallbacks(checkR)
+        scoRx?.let { r -> try { appCtx?.unregisterReceiver(r) } catch (_: Exception) {} }; scoRx = null
         if (Build.VERSION.SDK_INT >= 31) try { (devListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) } } catch (_: Exception) {}
         devListener = null
         if (Build.VERSION.SDK_INT >= 31) try { (modeListener as? AudioManager.OnModeChangedListener)?.let { a.removeOnModeChangedListener(it) } } catch (_: Exception) {}
@@ -241,6 +297,7 @@ object AudioRouter {
 
     fun apply() {
         val a = am ?: return
+        selfUntil = android.os.SystemClock.elapsedRealtime() + 2500
         val speaker = Prefs.speaker
         try {
             if (Build.VERSION.SDK_INT >= 31) {

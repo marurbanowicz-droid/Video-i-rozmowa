@@ -1062,7 +1062,7 @@ object Engine {
     private fun applyRemoteSetting(k: String, s: String) {
         if (k.startsWith("cvol_")) { s.toFloatOrNull()?.let { coachVols[k.removePrefix("cvol_")] = it.coerceIn(0f, 3f); applyRemote() }; return }
         val ed = Prefs.sp.edit()
-        val actions = setOf("volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone")
+        val actions = setOf("none", "volume", "mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone")
         when (k) {
             "speaker" -> { Prefs.speaker = s == "true"; onMain { AudioRouter.apply() } }
             "mute" -> { athMuted = s == "true"; micOn = !athMuted; applyLocal() }

@@ -94,7 +94,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val acts = if (coach) arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk", "Nagrywanie start / stop", "Notatka głosowa start / stop", "Ponton: wycisz wszystkich")
                    else arrayOf("Wycisz wszystko (wysyłanie i odbiór)", "Wycisz mikrofon", "Push-to-talk")
         val actVals = if (coach) arrayOf("mute_all", "mute_mic", "ptt", "record", "note", "mute_everyone") else arrayOf("mute_all", "mute_mic", "ptt")
-        talk.list("headset_action", "Środkowy przycisk słuchawek", acts, actVals, "mute_all")
+        talk.list("headset_action", "Środkowy przycisk słuchawek", acts + "Nic (tylko przywróć dźwięk)", actVals + "none", "mute_all")
         talk.list("vol_up", "Przycisk głośności +", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, "mute_all")
         talk.list("vol_down", "Przycisk głośności −", arrayOf("Zwykła głośność") + acts, arrayOf("volume") + actVals, if (coach) "record" else "volume")
         talk.action("Jak działają przyciski", "Działają też przy zgaszonym ekranie. Push-to-talk: przytrzymaj, aby mówić; w słuchawkach Bluetooth – kliknij, aby zacząć i kliknij ponownie, aby skończyć.") {}
