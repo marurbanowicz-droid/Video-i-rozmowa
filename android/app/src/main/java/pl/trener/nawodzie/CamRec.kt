@@ -428,6 +428,7 @@ object CamRec {
         if (Prefs.stabLog && superOn) StabLog.start(File(dir, "$base.gyro.csv"), logHeader + "video_started_ms=$started")
         val sink: (ByteArray, Int, Int) -> Unit = { data, sr, ch -> pw.write(data, sr, ch) }
         inUse.add(base)
+        Motion.setFast(true)
         try {
             recording = vc.output.prepareRecording(app, FileOutputOptions.Builder(vFile).build())
                 .start(ContextCompat.getMainExecutor(app)) { ev ->
@@ -438,6 +439,7 @@ object CamRec {
                             pw.close()
                             StabLog.stop()
                             recording = null
+                            Motion.setFast(false)
                             videoRotation = rotation
                             // orientacja mogła się zmienić w trakcie nagrania – następne nagranie ma mieć aktualną
                             try { videoCapture?.targetRotation = rotation } catch (_: Exception) {}
@@ -456,7 +458,7 @@ object CamRec {
                     }
                 }
         } catch (e: Exception) {
-            Log.e(TAG, "start", e); inUse.remove(base); pw.close(); cleanup(dir, base)
+            Log.e(TAG, "start", e); inUse.remove(base); pw.close(); cleanup(dir, base); Motion.setFast(false)
             Notifier.toast("Nie udało się rozpocząć nagrywania: ${e.message}"); return false
         }
         Engine.pcmSink = sink

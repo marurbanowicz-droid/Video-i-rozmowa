@@ -98,8 +98,23 @@ object Motion : SensorEventListener {
             val m = ctx.applicationContext.getSystemService(SensorManager::class.java); sm = m
             val h = Handler(t.looper)
             try { m.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { m.registerListener(this, it, 10_000, h) } } catch (e: Exception) { Log.e(TAG, "acc", e) }
-            // 200 Hz – najwyższa częstotliwość dostępna bez dodatkowych uprawnień (Android 12+)
-            try { m.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { m.registerListener(this, it, 5_000, h) } } catch (e: Exception) { Log.e(TAG, "gyro", e) }
+            // 200 Hz w czasie nagrywania (najwyższa częstotliwość bez dodatkowych uprawnień), 50 Hz poza nim – oszczędza baterię
+            try { m.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { m.registerListener(this, it, if (fast) 5_000 else 20_000, h) } } catch (e: Exception) { Log.e(TAG, "gyro", e) }
+        }
+    }
+
+    @Volatile private var fast = false
+    /** Pełna częstotliwość żyroskopu tylko w czasie nagrywania. */
+    fun setFast(on: Boolean) {
+        synchronized(lock) {
+            if (fast == on) return
+            fast = on
+            val m = sm ?: return; val t = thread ?: return
+            try {
+                val g = m.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: return
+                m.unregisterListener(this, g)
+                m.registerListener(this, g, if (on) 5_000 else 20_000, Handler(t.looper))
+            } catch (e: Exception) { Log.e(TAG, "gyro rate", e) }
         }
     }
 
@@ -802,7 +817,9 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         }
         if (ringOk) { pushRing(ts, tC, e); emitDelayed(ts, rot, corners); return }
 
-        val As = bands(fdNow)
+        // podgląd bez nagrywania: bez liczenia stabilizacji (sam kadr) – mniej pracy procesora
+        val idle = !videoOnly && CamRec.recording == null
+        val As = if (idle) null else bands(fdNow)
         val v = if (As != null) (if (videoOnly) (if (rawCal) null else videoV(fdNow, As, rot, corners)) else previewV(fdNow, As, rot, corners, dt)) else null
         val hs = homs(As, v, fdNow)
         val prog = progOes ?: return

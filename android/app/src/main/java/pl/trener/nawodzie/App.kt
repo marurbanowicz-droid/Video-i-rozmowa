@@ -78,6 +78,14 @@ object Notifier {
     fun beep(kind: String) = onMain {
         try {
             val g = tone ?: ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90).also { tone = it }
+            // tryb ponton: te same dźwięki co mikrofon, ale powtórzone – włączenie 3× niski, wyłączenie 2× podwójny wysoki
+            if (kind == "ponton_on" || kind == "ponton_off") {
+                val on = kind == "ponton_on"
+                val t = if (on) ToneGenerator.TONE_PROP_NACK else ToneGenerator.TONE_PROP_ACK
+                val n = if (on) 3 else 2; val gap = if (on) 450L else 600L
+                for (i in 0 until n) mainHandler.postDelayed({ try { g.startTone(t, 400) } catch (_: Exception) {} }, i * gap)
+                return@onMain
+            }
             val t = when (kind) {
                 "join" -> ToneGenerator.TONE_PROP_ACK
                 "back" -> ToneGenerator.TONE_PROP_BEEP2
@@ -131,6 +139,46 @@ object AudioRouter {
     private val focusListener = AudioManager.OnAudioFocusChangeListener { ch ->
         // po zwykłej rozmowie telefonicznej system oddaje nam dźwięk – przywracamy tryb rozmowy i słuchawki
         if (ch == AudioManager.AUDIOFOCUS_GAIN) mainHandler.postDelayed({ reassert() }, 700)
+        // trwała utrata (np. asystent głosowy uruchomiony przyciskiem słuchawek) – po chwili odbieramy dźwięk z powrotem
+        if (ch == AudioManager.AUDIOFOCUS_LOSS) mainHandler.postDelayed({
+            val a = am; val f = focus
+            if (a != null && f != null) { try { a.requestAudioFocus(f) } catch (_: Exception) {}; reassert() }
+        }, 2500)
+    }
+
+    // Słuchawki Bluetooth potrafią same rozłączyć kanał rozmowy (np. środkowym przyciskiem – „zakończ połączenie”).
+    // Sprawdzamy co kilka sekund i po każdej zmianie, czy dźwięk idzie tam, gdzie powinien, i w razie potrzeby przywracamy.
+    private var devListener: Any? = null
+    private var lastFix = 0L
+    private val checkR = object : Runnable { override fun run() { verify(); mainHandler.postDelayed(this, 4000) } }
+
+    private fun target(a: AudioManager): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < 31) return null
+        val devs = a.availableCommunicationDevices
+        fun find(vararg types: Int) = devs.firstOrNull { it.type in types }
+        return if (Prefs.speaker) find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        else find(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
+            ?: find(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES)
+            ?: find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+    }
+
+    private fun verify() {
+        val a = am ?: return
+        if (Build.VERSION.SDK_INT < 31) return
+        try {
+            val mode = a.mode
+            if (mode != AudioManager.MODE_IN_COMMUNICATION && mode != AudioManager.MODE_NORMAL) return   // trwa zwykła rozmowa telefoniczna
+            val want = target(a) ?: return
+            val cur = a.communicationDevice
+            if (mode == AudioManager.MODE_NORMAL || cur == null || cur.id != want.id) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastFix < 1500) return
+                lastFix = now
+                if (mode == AudioManager.MODE_NORMAL) a.mode = AudioManager.MODE_IN_COMMUNICATION
+                a.setCommunicationDevice(want)
+                Controls.rebase(); Controls.reclaim()
+            }
+        } catch (_: Exception) {}
     }
 
     private fun reassert() {
@@ -166,11 +214,19 @@ object AudioRouter {
             override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) { apply() }
         }
         a.registerAudioDeviceCallback(cb, mainHandler)
+        if (Build.VERSION.SDK_INT >= 31) try {
+            val l = AudioManager.OnCommunicationDeviceChangedListener { mainHandler.postDelayed({ verify() }, 1500) }
+            a.addOnCommunicationDeviceChangedListener(androidx.core.content.ContextCompat.getMainExecutor(ctx), l); devListener = l
+        } catch (_: Exception) {}
+        mainHandler.removeCallbacks(checkR); mainHandler.postDelayed(checkR, 4000)
     }
 
     fun stop() {
         val a = am ?: return
         cb?.let { a.unregisterAudioDeviceCallback(it) }; cb = null
+        mainHandler.removeCallbacks(checkR)
+        if (Build.VERSION.SDK_INT >= 31) try { (devListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) } } catch (_: Exception) {}
+        devListener = null
         if (Build.VERSION.SDK_INT >= 31) try { (modeListener as? AudioManager.OnModeChangedListener)?.let { a.removeOnModeChangedListener(it) } } catch (_: Exception) {}
         modeListener = null
         try { val v = a.getStreamVolume(AudioManager.STREAM_VOICE_CALL); if (v > 0) Prefs.voiceVol = v } catch (_: Exception) {}
@@ -188,13 +244,7 @@ object AudioRouter {
         val speaker = Prefs.speaker
         try {
             if (Build.VERSION.SDK_INT >= 31) {
-                val devs = a.availableCommunicationDevices
-                fun find(vararg types: Int) = devs.firstOrNull { it.type in types }
-                val target = if (speaker) find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-                else find(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
-                    ?: find(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES)
-                    ?: find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-                if (target != null) a.setCommunicationDevice(target)
+                target(a)?.let { a.setCommunicationDevice(it) }
             } else {
                 val outs = a.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                 val bt = outs.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
