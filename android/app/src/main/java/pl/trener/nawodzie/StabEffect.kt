@@ -70,7 +70,7 @@ import kotlin.math.sqrt
 // Orientacja telefonu (wspólna dla podglądu i nagrania)
 // ======================================================================================
 object Motion : SensorEventListener {
-    private const val N = 1024                 // ok. 5 s historii przy 200 Hz
+    private const val N = 4096                 // kilka sekund historii także przy 500 Hz
     private const val TAG = "Motion"
     private val lock = Any()
     private var users = 0
@@ -86,24 +86,30 @@ object Motion : SensorEventListener {
     private val th = DoubleArray(3)            // scałkowany surowy żyroskop (tryb Sport)
 
     private val hTs = LongArray(N); private val hQ = Array(N) { DoubleArray(4) }; private val hTh = Array(N) { DoubleArray(3) }
+    private val hW = Array(N) { DoubleArray(3) }  // prędkość kątowa (z korektą grawitacji) w chwili próbki
+    private val pw = DoubleArray(3); private var hasPw = false
+    // rzeczywista częstotliwość żyroskopu (do zapisu danych)
+    @Volatile var gyroHz = 0.0; private set
+    private var rateN = 0; private var rateT0 = 0L
     private var head = 0; private var count = 0
 
     fun acquire(ctx: Context) {
         synchronized(lock) {
             users++
             if (users > 1) return
-            ready = false; hasAcc = false; lastTs = 0; count = 0; head = 0; th.fill(0.0)
+            ready = false; hasAcc = false; hasPw = false; lastTs = 0; count = 0; head = 0; th.fill(0.0)
             qw = 1.0; qx = 0.0; qy = 0.0; qz = 0.0
             val t = HandlerThread("motion").apply { start() }; thread = t
             val m = ctx.applicationContext.getSystemService(SensorManager::class.java); sm = m
             val h = Handler(t.looper)
             try { m.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { m.registerListener(this, it, 10_000, h) } } catch (e: Exception) { Log.e(TAG, "acc", e) }
-            // 200 Hz w czasie nagrywania (najwyższa częstotliwość bez dodatkowych uprawnień), 50 Hz poza nim – oszczędza baterię
-            try { m.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { m.registerListener(this, it, if (fast) 5_000 else 20_000, h) } } catch (e: Exception) { Log.e(TAG, "gyro", e) }
+            // w czasie nagrywania najwyższa częstotliwość żyroskopu (uprawnienie HIGH_SAMPLING_RATE_SENSORS), poza nim 50 Hz
+            try { m.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { m.registerListener(this, it, gyroDelay(), h) } } catch (e: Exception) { Log.e(TAG, "gyro", e) }
         }
     }
 
     @Volatile private var fast = false
+    private fun gyroDelay() = if (fast) SensorManager.SENSOR_DELAY_FASTEST else 20_000
     /** Pełna częstotliwość żyroskopu tylko w czasie nagrywania. */
     fun setFast(on: Boolean) {
         synchronized(lock) {
@@ -113,7 +119,8 @@ object Motion : SensorEventListener {
             try {
                 val g = m.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: return
                 m.unregisterListener(this, g)
-                m.registerListener(this, g, if (on) 5_000 else 20_000, Handler(t.looper))
+                m.registerListener(this, g, gyroDelay(), Handler(t.looper))
+                rateN = 0
             } catch (e: Exception) { Log.e(TAG, "gyro rate", e) }
         }
     }
@@ -141,6 +148,8 @@ object Motion : SensorEventListener {
             }
             if (e.sensor.type != Sensor.TYPE_GYROSCOPE || !ready) return
             val ts = e.timestamp
+            if (rateN == 0) rateT0 = ts
+            if (++rateN >= 200) { if (ts > rateT0) gyroHz = (rateN - 1) * 1e9 / (ts - rateT0); rateN = 0 }
             if (lastTs == 0L) { lastTs = ts; return }
             val dt = ((ts - lastTs) / 1e9).coerceIn(0.0, 0.05); lastTs = ts
             if (dt <= 0.0) return
@@ -157,7 +166,11 @@ object Motion : SensorEventListener {
                 val kp = if (ts - startTs < 2_000_000_000L) 2.0 else 0.08
                 wx += kp * ex; wy += kp * ey; wz += kp * ez
             }
-            // całkowanie: q = q ⊗ Δq (prędkości kątowe w układzie telefonu)
+            // całkowanie metodą trapezów: q = q ⊗ Δq ze średniej prędkości z początku i końca przedziału
+            // (wcześniej brana była wartość z końca – orientacja wyprzedzała rzeczywistą o pół okresu próbkowania)
+            val cx = wx; val cy = wy; val cz = wz
+            if (hasPw) { wx = (wx + pw[0]) / 2; wy = (wy + pw[1]) / 2; wz = (wz + pw[2]) / 2 }
+            pw[0] = cx; pw[1] = cy; pw[2] = cz; hasPw = true
             val w = sqrt(wx * wx + wy * wy + wz * wz)
             val half = w * dt / 2
             val s = if (w > 1e-9) sin(half) / w else dt / 2
@@ -171,6 +184,7 @@ object Motion : SensorEventListener {
             hTs[head] = ts
             hQ[head][0] = qw; hQ[head][1] = qx; hQ[head][2] = qy; hQ[head][3] = qz
             hTh[head][0] = th[0]; hTh[head][1] = th[1]; hTh[head][2] = th[2]
+            hW[head][0] = cx; hW[head][1] = cy; hW[head][2] = cz
             head = (head + 1) % N; if (count < N) count++
         }
     }
@@ -201,9 +215,21 @@ object Motion : SensorEventListener {
                 if (hTs[j] <= ts) {
                     val span = (hTs[i] - hTs[j]).toDouble()
                     val f = if (span > 0) (ts - hTs[j]) / span else 0.0
-                    val a = hQ[j]; val b = hQ[i]
-                    val sg = if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3] < 0) -1.0 else 1.0
-                    for (c in 0..3) outQ[c] = a[c] * (1 - f) + b[c] * sg * f
+                    // między próbkami: prędkość zmienia się liniowo → kąt rośnie kwadratowo (dokładniej niż prosta interpolacja)
+                    val tau = (ts - hTs[j]) / 1e9; val dsp = span / 1e9
+                    val wa = hW[j]; val wb = hW[i]
+                    val c2 = if (dsp > 0) tau * tau / (2 * dsp) else 0.0
+                    val px = wa[0] * tau + (wb[0] - wa[0]) * c2
+                    val py = wa[1] * tau + (wb[1] - wa[1]) * c2
+                    val pz = wa[2] * tau + (wb[2] - wa[2]) * c2
+                    val an = sqrt(px * px + py * py + pz * pz)
+                    val sh = if (an > 1e-12) sin(an / 2) / an else 0.5
+                    val dw = cos(an / 2); val dx = px * sh; val dy = py * sh; val dz = pz * sh
+                    val a = hQ[j]
+                    outQ[0] = a[0] * dw - a[1] * dx - a[2] * dy - a[3] * dz
+                    outQ[1] = a[0] * dx + a[1] * dw + a[2] * dz - a[3] * dy
+                    outQ[2] = a[0] * dy - a[1] * dz + a[2] * dw + a[3] * dx
+                    outQ[3] = a[0] * dz + a[1] * dy - a[2] * dx + a[3] * dw
                     qNorm(outQ)
                     if (outTh != null) for (c in 0..2) outTh[c] = hTh[j][c] * (1 - f) + hTh[i][c] * f
                     return true
@@ -464,9 +490,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private var imgW = 1440; private var imgH = 1080
     private val rawCal = Prefs.stabRawCal                      // kalibracja: nagranie bez korekty (ten sam obiektyw i kadr)
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
-    // kalibracja z nagrania 18.11 (Galaxy S24 FE, obiektyw szeroki): przesunięcie czasu +2,5 ms, ogniskowa ×1,05
+    // kalibracja z nagrania 18.11 (Galaxy S24 FE, obiektyw szeroki): ogniskowa ×1,05; przesunięcie czasu +2,5 ms zmierzone
+    // przy dawnym całkowaniu żyroskopu (125 Hz, wartość z końca przedziału = wyprzedzenie 4 ms) → przy całkowaniu trapezami +6,5 ms
     private val calDev = android.os.Build.MODEL.startsWith("SM-S721")
-    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 2_500_000L else 0L)
+    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 6_500_000L else 0L)
     private val wideCalF = if (calDev) 1.05 else 1.0
     private val rsDir = Prefs.stabRs
     private val invert = Prefs.stabInvert
@@ -508,6 +535,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val track = ArrayDeque<Smp>()
     private val qTmp = DoubleArray(4)
     private var pLam = 0.0
+    private var lastLam = 0.0
     private var logSession = -1
 
     // ---- napis z datą ----
@@ -747,7 +775,9 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
             lam = max(lam, needLam1(qToM(s.q), v0, fd, corners) * w)
         }
         var v = if (lam > 1e-4) mBlend(v0, As[NB / 2], lam) else v0
-        if (!fits(As, v, fd, corners)) v = mBlend(v, As[NB / 2], needLam(As, v, fd, corners))
+        var extra = 0.0
+        if (!fits(As, v, fd, corners)) { extra = needLam(As, v, fd, corners); v = mBlend(v, As[NB / 2], extra) }
+        lastLam = 1 - (1 - lam) * (1 - extra)   // do zapisu: ile ruchu telefonu przeszło do kadru (0 = pełna stabilizacja)
         return v
     }
 
@@ -836,9 +866,9 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         if (!StabLog.active) return
         if (logSession != StabLog.session) {
             logSession = StabLog.session
-            StabLog.line("# stream=${inW}x$inH swap=$swap st=${stM.take(6).joinToString(";")} rotation=${rotationFor()} lookahead_ms=${lookNs / 1_000_000} fMain=$fMain lensR=$lensR czMin=$czMin smooth_s=$sigma time_offset_ms=${offsetNs / 1_000_000} rs=$rsDir\n")
+            StabLog.line("# stream=${inW}x$inH swap=$swap st=${stM.take(6).joinToString(";")} rotation=${rotationFor()} lookahead_ms=${lookNs / 1_000_000} fMain=$fMain lensR=$lensR czMin=$czMin smooth_s=$sigma time_offset_us=${offsetNs / 1_000} rs=$rsDir gyro_hz=${"%.0f".format(java.util.Locale.US, Motion.gyroHz)}\n")
         }
-        StabLog.line("f,$src,$pts,${fd.exp},${fd.skew},${fd.cz},${fd.e},${fd.k},${fd.phys ?: ""}\n")
+        StabLog.line("f,$src,$pts,${fd.exp},${fd.skew},${fd.cz},${fd.e},${fd.k},${fd.phys ?: ""},${"%.4f".format(java.util.Locale.US, lastLam)}\n")
     }
 
     private fun begin(es: EGLSurface, so: SurfaceOutput) {
