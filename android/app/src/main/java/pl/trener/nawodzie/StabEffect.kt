@@ -494,9 +494,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
     // kalibracja z nagrania 18.11 (Galaxy S24 FE, obiektyw szeroki): ogniskowa ×1,05; przesunięcie czasu +2,5 ms zmierzone
     // przy dawnym całkowaniu żyroskopu (125 Hz). Przy 500 Hz i całkowaniu trapezami pomiar z nagrań z wody 20.11
-    // (dwa ujęcia, zgodnie w obu osiach): obraz był korygowany ok. 5,4 ms za późno względem 6,5 ms → +1,0 ms
+    // (dwa ujęcia, zgodnie w obu osiach): obraz był korygowany ok. 5,4 ms za późno względem 6,5 ms; nagrania kalibracyjne 20.11
+    // (500 Hz, ląd i woda, obiektyw szeroki): 1–3,5 ms, ogniskowa ×1,05–1,06 → +2,0 ms
     private val calDev = android.os.Build.MODEL.startsWith("SM-S721")
-    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 1_000_000L else 0L)
+    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 2_000_000L else 0L)
     private val wideCalF = if (calDev) 1.05 else 1.0
     private val rsDir = Prefs.stabRs
     private val invert = Prefs.stabInvert
