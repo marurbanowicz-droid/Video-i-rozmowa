@@ -78,14 +78,8 @@ object Notifier {
     fun beep(kind: String) = onMain {
         try {
             val g = tone ?: ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90).also { tone = it }
-            // tryb ponton: te same dźwięki co mikrofon, ale powtórzone – włączenie 3× niski, wyłączenie 2× podwójny wysoki
-            if (kind == "ponton_on" || kind == "ponton_off") {
-                val on = kind == "ponton_on"
-                val t = if (on) ToneGenerator.TONE_PROP_NACK else ToneGenerator.TONE_PROP_ACK
-                val n = if (on) 3 else 2; val gap = if (on) 450L else 600L
-                for (i in 0 until n) mainHandler.postDelayed({ try { g.startTone(t, 400) } catch (_: Exception) {} }, i * gap)
-                return@onMain
-            }
+            // tryb ponton: własna melodia (inna niż sygnały mikrofonu) – włączenie: trzy tony w dół, wyłączenie: trzy w górę
+            if (kind == "ponton_on" || kind == "ponton_off") { melody(kind == "ponton_on"); return@onMain }
             val t = when (kind) {
                 "join" -> ToneGenerator.TONE_PROP_ACK
                 "back" -> ToneGenerator.TONE_PROP_BEEP2
@@ -100,6 +94,40 @@ object Notifier {
     }
 
     /** Start / stop nagrywania: dźwięk i wibracja (start – jeden dłuższy, stop – dwa krótkie). */
+    private fun melody(down: Boolean) {
+        Thread {
+            try {
+                val sr = 16000
+                val notes = if (down) intArrayOf(1320, 990, 660) else intArrayOf(660, 990, 1320)
+                val nLen = sr * 160 / 1000; val gap = sr * 40 / 1000
+                val pcm = ShortArray(notes.size * (nLen + gap))
+                var o = 0
+                for (f in notes) {
+                    for (i in 0 until nLen) {
+                        val env = minOf(1.0, i / 160.0, (nLen - i) / 400.0)
+                        val x = Math.sin(2 * Math.PI * f * i / sr) * 0.8 + Math.sin(4 * Math.PI * f * i / sr) * 0.15
+                        pcm[o + i] = (x * env * 0.55 * Short.MAX_VALUE).toInt().toShort()
+                    }
+                    o += nLen + gap
+                }
+                val at = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                    .setAudioFormat(android.media.AudioFormat.Builder().setSampleRate(sr).setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
+                at.write(pcm, 0, pcm.size); at.play()
+                Thread.sleep(pcm.size * 1000L / sr + 200); at.release()
+            } catch (_: Exception) {}
+        }.start()
+        try {
+            val v: android.os.Vibrator? = if (android.os.Build.VERSION.SDK_INT >= 31)
+                app.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+            else @Suppress("DEPRECATION") app.getSystemService(android.os.Vibrator::class.java)
+            v?.vibrate(android.os.VibrationEffect.createWaveform(if (down) longArrayOf(0, 400) else longArrayOf(0, 80, 80, 80, 80, 80), -1))
+        } catch (_: Exception) {}
+    }
+
     fun recCue(start: Boolean) = onMain {
         try {
             val g = tone ?: ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90).also { tone = it }

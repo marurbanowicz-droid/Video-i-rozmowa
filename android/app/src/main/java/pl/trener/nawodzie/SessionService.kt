@@ -62,6 +62,7 @@ class SessionService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        CpuDiag.startSampling()
         running = true
         Engine.addUi(ui)
     }

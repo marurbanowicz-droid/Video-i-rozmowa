@@ -15,15 +15,36 @@ object CpuDiag {
 
     private fun fields(stat: String): List<String> = stat.substring(stat.lastIndexOf(')') + 2).split(' ')
 
-    private fun threads(): Map<String, Long> {
-        val m = HashMap<String, Long>()
+    // Co 5 s zapamiętujemy czas każdego wątku (po numerze), żeby po zakończeniu wątku wiedzieć, jak się nazywał.
+    private val seen = HashMap<Int, Pair<String, Long>>()
+    private var sampler: Thread? = null
+
+    private fun scan(): Map<Int, Pair<String, Long>> {
+        val m = HashMap<Int, Pair<String, Long>>()
         for (t in File("/proc/self/task").listFiles() ?: emptyArray()) try {
             val st = File(t, "stat").readText()
             val name = st.substring(st.indexOf('(') + 1, st.lastIndexOf(')'))
                 .replace(Regex("[0-9]+"), "#").trim()
             val f = fields(st)
-            m[name] = (m[name] ?: 0L) + f[11].toLong() + f[12].toLong()
+            m[t.name.toInt()] = name to (f[11].toLong() + f[12].toLong())
         } catch (_: Exception) {}
+        return m
+    }
+
+    @Synchronized private fun sample() { seen.putAll(scan()) }
+
+    fun startSampling() {
+        if (sampler != null) return
+        sampler = Thread {
+            while (true) { try { sample(); Thread.sleep(5000) } catch (_: InterruptedException) { return@Thread } catch (_: Exception) {} }
+        }.apply { isDaemon = true; name = "cpu-diag"; start() }
+    }
+
+    /** Suma czasu po nazwie – także wątków już zakończonych (ostatni odczyt sprzed ≤5 s). */
+    @Synchronized private fun threads(): Map<String, Long> {
+        seen.putAll(scan())
+        val m = HashMap<String, Long>()
+        for ((name, v) in seen.values) m[name] = (m[name] ?: 0L) + v
         return m
     }
 
@@ -40,6 +61,7 @@ object CpuDiag {
     }
 
     fun reset() {
+        startSampling()
         base = threads(); baseTotal = procTotal().first; baseAt = SystemClock.elapsedRealtime()
     }
 

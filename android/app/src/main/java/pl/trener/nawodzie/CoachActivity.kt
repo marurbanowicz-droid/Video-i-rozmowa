@@ -315,8 +315,26 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             }
             root.addView(zoomCol, FrameLayout.LayoutParams(dp(118), -1, Gravity.END).apply { rightMargin = dp(96); topMargin = dp(8); bottomMargin = dp(8) })
         }
+        // głośność rozmowy: + / − na ekranie (przyciski głośności telefonu mogą mieć inne funkcje)
+        fun volBtn(t: String, up: Boolean) = TextView(this).apply {
+            text = t; gravity = Gravity.CENTER; setTextColor(0xFFFFFFFF.toInt()); textSize = 24f
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x66000000) }
+            setOnClickListener {
+                if (up) Vol.up(this@CoachActivity) else Vol.down(this@CoachActivity)
+                volToast?.cancel()
+                volToast = android.widget.Toast.makeText(this@CoachActivity, "Głośność rozmowy: " + Vol.label(this@CoachActivity), android.widget.Toast.LENGTH_SHORT).also { it.show() }
+            }
+        }
+        val volCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            addView(volBtn("+", true), LinearLayout.LayoutParams(dp(46), dp(46)))
+            addView(volBtn("−", false), LinearLayout.LayoutParams(dp(46), dp(46)).apply { topMargin = dp(10) })
+        }
+        root.addView(volCol, FrameLayout.LayoutParams(-2, -2, (if (landscape) Gravity.START else Gravity.END) or Gravity.CENTER_VERTICAL)
+            .apply { if (landscape) leftMargin = dp(10) else rightMargin = dp(10) })
         setContentView(root)
     }
+    private var volToast: android.widget.Toast? = null
 
     // ---------------- zoom ----------------
     private fun applyZoom(z: Float) {

@@ -478,8 +478,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     val executor = Executor { handler.post(it) }
 
     private val horizon = mode == "superh"
+    // tryb OIS: bez korekty, tylko zoom cyfrowy powyżej zakresu aparatu (do 20×) i napis z datą
+    private val pass = mode == "off"
     private val videoOnly = targets == CameraEffect.VIDEO_CAPTURE
-    private val wantDelay = videoOnly
+    private val wantDelay = videoOnly && !pass
     private val sensorRot = sensorRotation
     // Układ obrazu wejściowego. Macierz SurfaceTexture może już zawierać obrót matrycy (wtedy obraz jest „pionowy”
     // jak telefon w pozycji naturalnej) – wykrywamy to z macierzy przy pierwszej klatce.
@@ -491,9 +493,11 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private val rawCal = Prefs.stabRawCal                      // kalibracja: nagranie bez korekty (ten sam obiektyw i kadr)
     private val sigma = Prefs.stabSmooth                       // s – siła wygładzania toru
     // kalibracja z nagrania 18.11 (Galaxy S24 FE, obiektyw szeroki): ogniskowa ×1,05; przesunięcie czasu +2,5 ms zmierzone
-    // przy dawnym całkowaniu żyroskopu (125 Hz, wartość z końca przedziału = wyprzedzenie 4 ms) → przy całkowaniu trapezami +6,5 ms
+    // przy dawnym całkowaniu żyroskopu (125 Hz). Przy 500 Hz i całkowaniu trapezami pomiar z nagrań z wody 20.11
+    // (dwa ujęcia, zgodnie w obu osiach): obraz był korygowany ok. 5,4 ms za późno względem 6,5 ms; nagrania kalibracyjne 20.11
+    // (500 Hz, ląd i woda, obiektyw szeroki): 1–3,5 ms, ogniskowa ×1,05–1,06 → +2,0 ms
     private val calDev = android.os.Build.MODEL.startsWith("SM-S721")
-    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 6_500_000L else 0L)
+    private val offsetNs = Prefs.stabTimeMs * 1_000_000L + (if (calDev) 2_000_000L else 0L)
     private val wideCalF = if (calDev) 1.05 else 1.0
     private val rsDir = Prefs.stabRs
     private val invert = Prefs.stabInvert
@@ -848,7 +852,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         if (ringOk) { pushRing(ts, tC, e); emitDelayed(ts, rot, corners); return }
 
         // podgląd bez nagrywania: bez liczenia stabilizacji (sam kadr) – mniej pracy procesora
-        val idle = !videoOnly && CamRec.recording == null
+        val idle = pass || (!videoOnly && CamRec.recording == null)
         val As = if (idle) null else bands(fdNow)
         val v = if (As != null) (if (videoOnly) (if (rawCal) null else videoV(fdNow, As, rot, corners)) else previewV(fdNow, As, rot, corners, dt)) else null
         val hs = homs(As, v, fdNow)
