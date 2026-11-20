@@ -122,6 +122,7 @@ object CamRec {
     private const val E_MAX = 20.0
     @Volatile var userZoom = 1f; private set
     @Volatile private var superOn = false
+    private var zK = K_NOM   // zapas kadru przy danym zoomie (SUPER: 1,8; OIS z zoomem cyfrowym: 1)
     private var zR = 1.0; private var zCzMin = 1f; private var zCzMax = 1f
     private var eMin = 1f; private var eMax = 1f
     /** Opis, z którego obiektywu korzysta tryb SUPER (do komunikatu). */
@@ -189,7 +190,9 @@ object CamRec {
             val mode = Prefs.stabMode
             val want = false
             val superMode = mode == "super" || mode == "superh"
-            superOn = false
+            // OIS: obraz przez ten sam tor (bez korekty), żeby zoom cyfrowy mógł sięgać 20× – optyczna stabilizacja zostaje włączona
+            val passMode = mode == "off"
+            superOn = false; zK = K_NOM
             var fMain = 0.694; var lensR = 1.0; var czMin = 1f
             if (superMode && info != null) {
                 fMain = fNormOf(info, false) ?: 0.694
@@ -224,6 +227,13 @@ object CamRec {
                     "mode=$mode", "lens=$superInfo", "fMain=$fMain lensR=$lensR czMin=$czMin czMax=$czMax eMin=$eMin eMax=$eMax",
                     "sensorRotation=${info.sensorRotationDegrees} quality=${Prefs.quality} aspect=${Prefs.aspect}",
                     "timestampSource=" + (try { Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) } catch (_: Throwable) { null }))
+            } else if (passMode && info != null) {
+                val rng = zoomRangeOf(info)
+                czMin = rng.first; lensR = 1.0
+                zK = 1.0; zR = 1.0; zCzMin = czMin
+                eMin = czMin
+                eMax = E_MAX.toFloat().coerceAtLeast(rng.second)
+                zCzMax = rng.second
             }
             val (q, br) = when (Prefs.quality) {
                 "HD" -> Quality.HD to 6_000_000
@@ -241,7 +251,7 @@ object CamRec {
             if (want && prevStabOk) pb.setPreviewStabilizationEnabled(true)
             val vb = VideoCapture.Builder(recorder).setTargetRotation(rotation)
             if (want && !prevStabOk && vidStabOk) vb.setVideoStabilizationEnabled(true)
-            val glMode = superMode
+            val glMode = superMode || (passMode && info != null)
             if (mode == "eis") {
                 val modes = try { info?.let { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) } } catch (_: Throwable) { null }
                 if (modes?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) try {
@@ -251,6 +261,7 @@ object CamRec {
                 else Notifier.toast("Ten telefon nie udostępnia aplikacjom stabilizacji elektronicznej – działa tylko optyczna")
             }
             if (glMode) {
+              if (superMode) {
                 // dane każdej klatki (czas naświetlania i odczytu matrycy, zoom) – potrzebne do dokładnej korekty
                 try { Camera2Interop.Extender(pb).setSessionCaptureCallback(FrameMeta.callback) } catch (e: Throwable) { Log.w(TAG, "meta", e) }
                 // Stabilizację liczy aplikacja z żyroskopu – optyczna musi być wyłączona, inaczej drgania byłyby korygowane dwa razy.
@@ -258,6 +269,7 @@ object CamRec {
                     Camera2Interop.Extender(pb).setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                     Camera2Interop.Extender(vb).setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                 } catch (e: Throwable) { Log.w(TAG, "ois off", e) }
+              } else try { Camera2Interop.Extender(pb).setSessionCaptureCallback(FrameMeta.callback) } catch (e: Throwable) { Log.w(TAG, "meta", e) }
             }
             val pv = pb.build()
             pv.setSurfaceProvider(surfaceProvider)
@@ -388,7 +400,7 @@ object CamRec {
     fun setZoom(ratio: Float) {
         if (superOn) {
             userZoom = ratio.coerceIn(eMin, eMax)
-            val cz = (userZoom / (zR * K_NOM)).toFloat().coerceIn(zCzMin, zCzMax)
+            val cz = (userZoom / (zR * zK)).toFloat().coerceIn(zCzMin, zCzMax)
             camera?.cameraControl?.setZoomRatio(cz)
         } else camera?.cameraControl?.setZoomRatio(ratio)
     }
@@ -425,7 +437,7 @@ object CamRec {
         videoRotation = rotation
         // tryb stabilizacji i opóźnienie obrazu (Horyzont płynny) – potrzebne przy zapisie, także po odzyskaniu nagrania
         try { File(dir, "$base.info").writeText("${modeSuffix(Prefs.stabMode)};$videoDelayMs") } catch (_: Exception) {}
-        if (Prefs.stabLog && superOn) StabLog.start(File(dir, "$base.gyro.csv"), logHeader + "video_started_ms=$started")
+        if (Prefs.stabLog && superOn && Prefs.stabMode.startsWith("super")) StabLog.start(File(dir, "$base.gyro.csv"), logHeader + "video_started_ms=$started")
         val sink: (ByteArray, Int, Int) -> Unit = { data, sr, ch -> pw.write(data, sr, ch) }
         inUse.add(base)
         Motion.setFast(true)

@@ -27,7 +27,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             Triple("talk", "Rozmowa i przyciski", "Tryb rozmowy, przyciski głośności i słuchawek"),
             Triple("snd", "Dźwięk i notatki", "Mikrofon, głośność, redukcja szumów, notatki głosowe"),
             Triple("net", "Połączenie i powiadomienia", "Jakość rozmowy, zużycie danych, sygnały, czuwanie w tle"),
-            Triple("app", "Aplikacja", "Aktualizacja, bateria, zamykanie"))
+            Triple("app", "Aplikacja", "Aktualizacja, bateria, zamykanie"),
+            Triple("dev", "Narzędzia i diagnostyka", "Dla rozwoju aplikacji: kalibracja stabilizacji, zużycie procesora"))
     }
     private var coach = true
     private var updPref: Preference? = null
@@ -72,7 +73,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 .apply { summaryProvider = null }   // opis ustawiamy sami w refreshDynamic()
             img.list("stab_smooth", "SUPER: siła wygładzania", arrayOf("Słaba – szybko podąża za ruchem", "Średnia", "Mocna", "Bardzo mocna – „pływający” obraz"),
                 arrayOf("0.2", "0.35", "0.6", "1.0"), "0.35")
-            val cal = cat("SUPER – kalibracja (zaawansowane)", "rec")
+            val cal = cat("Kalibracja stabilizacji SUPER", "dev")
             cal.sw("stab_log", "Zapisuj dane kalibracji", "Plik z danymi żyroskopu obok każdego nagrania SUPER (Dokumenty/TrenerNaWodzie/Kalibracja). Włącz tylko do testów.", false)
             cal.sw("stab_rawcal", "Nagranie kalibracyjne (bez stabilizacji)", "Tryb SUPER nagrywa ten sam kadr bez korekty – do wyliczenia dokładnych parametrów. Pamiętaj, żeby potem wyłączyć.", false)
             cal.edit("stab_t_ms", "Korekta czasu żyroskopu (ms)", "0", numeric = true).apply {
@@ -149,7 +150,6 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         val appCat = cat("Aplikacja", "app")
         appCat.action("Praca w tle bez ograniczeń baterii", "Zalecane – system nie zamknie sesji") { requireContext().askBatteryOnce(force = true) }
         updPref = appCat.action("Wersja ${BuildConfig.VERSION_NAME}", "Dotknij, aby sprawdzić aktualizację") { checkUpdate() }
-        appCat.action("Zużycie procesora (diagnostyka)", "Które części aplikacji pracują najwięcej – pomaga znaleźć przyczynę rozładowywania baterii") { showCpu() }
         appCat.action("Aktualizacja zachowuje dane", "Pokoje, ustawienia i nagrania zostają. Trwająca sesja wznawia się jednym dotknięciem po instalacji.") {}
         appCat.action("Zamknij aplikację", "Kończy sesję, wyłącza działanie w tle i powiadomienie – do następnego otwarcia aplikacji") {
             activity?.let { AppExit.confirm(it) }
@@ -159,6 +159,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 SessionService.endSession(requireContext()); activity?.finish()
             }
         }
+        cat("Diagnostyka", "dev").action("Zużycie procesora", "Które części aplikacji pracują najwięcej – pomaga znaleźć przyczynę rozładowywania baterii") { showCpu() }
         if (sec == null) {
             // ekran główny: lista działów, każdy otwiera się osobno
             for ((c, _) in cats) screen.removePreference(c)
