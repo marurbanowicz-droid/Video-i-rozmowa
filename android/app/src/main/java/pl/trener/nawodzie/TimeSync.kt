@@ -270,7 +270,7 @@ class RecTime(
         if (best == Long.MAX_VALUE || best / (m - 1) > 3_000_000L) return null
         // przy bardzo równych odstępach kilka miejsc pasuje tak samo – wybierz najbliższe chwili startu nagrania
         var pick = -1; var dist = Long.MAX_VALUE
-        for (k in errs.indices) if (errs[k] <= best + (m - 1) * 100_000L) {
+        for (k in errs.indices) if (errs[k] <= best + (m - 1) * 2_000L) {
             val d = abs(logCap[k] - (startHintNs - delayMs * 1_000_000L))
             if (d < dist) { dist = d; pick = k }
         }
