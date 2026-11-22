@@ -107,6 +107,8 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
         if (coach) {
             snd.sw("coach_noise", "Redukcja szumów w rozmowie", "Dotyczy tego, co słyszą zawodnicy. Nagranie wideo dostaje dźwięk bez redukcji.", false)
             snd.sw("rec_raw", "Nagranie bez redukcji szumów systemu", "Mikrofon bez filtrów telefonu – sygnał startu nie jest tłumiony. Działa po ponownym rozpoczęciu sesji. Używaj w słuchawkach (bez głośnika), żeby nie było echa.", false)
+            snd.list("rec_mix", "Głosy zawodników w nagraniu", arrayOf("Nie (tylko mikrofon)", "Cicho (0,5×)", "Normalnie (1×)", "Głośno (2×)"), arrayOf("0", "0.5", "1", "2"), "0")
+            snd.action("Jak to działa", "Rozmowy z zawodnikami są dodawane do ścieżki dźwiękowej nagrania wideo, tak jak je słyszysz. W słuchawkach nie ma echa; przy głośniku telefonu głosy mogą się podwoić.") {}
             snd.sw("coach_wind", "Filtr niskich tonów (wiatr)", "Tłumi dudnienie wiatru i silnika.", true)
             snd.sw("crosstalk", "Zawodnicy słyszą się nawzajem", "Każdy zawodnik łączy się z każdym – działa też z zawodnikami na stronie (iPhone).", true)
         } else {

@@ -79,6 +79,7 @@ object Prefs {
     val audioOffsetMs: Long get() = (sp.getString("audio_offset", "0") ?: "0").trim().toLongOrNull() ?: 0L
     /** Notatki głosowe: transkrypcja i opcjonalny klucz OpenAI (Whisper). */
     /** Nagranie z surowego mikrofonu (bez redukcji szumów i AGC systemu) – przy starcie sesji. */
+    val recMix: Float get() = (sp.getString("rec_mix", "0") ?: "0").toFloatOrNull() ?: 0f
     val recRaw get() = sp.getBoolean("rec_raw", false)
     val noteTranscribe get() = sp.getBoolean("note_transcribe", true)
     val openaiKey: String get() = (sp.getString("openai_key", "") ?: "").trim()

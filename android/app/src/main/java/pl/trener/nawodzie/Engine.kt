@@ -257,6 +257,74 @@ object Engine {
 
     private inline fun safe(block: () -> Unit) { try { block() } catch (e: Exception) { Log.e(TAG, "error", e) } }
 
+    // ---------------- miksowanie głosów zdalnych do ścieżki nagrania ----------------
+    /** Bufor jednej zdalnej ścieżki (mono, 16 bit): wpisuje wątek WebRTC, odczytuje wywołanie mikrofonu. */
+    private class MixBuf {
+        private val a = ShortArray(48000 * 2)
+        private var wr = 0L; private var rd = 0L
+        @Volatile var rate = 48000
+        @Synchronized fun put(src: ShortArray, n: Int, r: Int) {
+            if (r != rate) { rate = r; rd = wr }
+            for (i in 0 until n) { a[(wr % a.size).toInt()] = src[i]; wr++ }
+            if (wr - rd > a.size) rd = wr - a.size
+        }
+        /** Dodaje do [acc] [n] próbek (w częstotliwości mikrofonu [micRate]), z przeliczeniem częstotliwości. */
+        @Synchronized fun addTo(acc: IntArray, n: Int, micRate: Int, gain: Float) {
+            val ratio = rate.toDouble() / micRate
+            val need = (n * ratio).toLong()
+            if (wr - rd <= 0) return
+            // zbyt duże opóźnienie (>250 ms) – przeskocz do świeżych próbek
+            if (wr - rd > rate / 4) rd = wr - maxOf(need, rate / 20L)
+            for (i in 0 until n) {
+                val idx = rd + (i * ratio).toLong()
+                if (idx >= wr) break
+                acc[i] += (a[(idx % a.size).toInt()] * gain).toInt()
+            }
+            rd = minOf(wr, rd + need)
+        }
+    }
+    private val mixBufs = java.util.concurrent.ConcurrentHashMap<AudioTrack, MixBuf>()
+    private val mixSinks = java.util.concurrent.ConcurrentHashMap<AudioTrack, org.webrtc.AudioTrackSink>()
+
+    private fun attachMix(t: AudioTrack) {
+        if (mixBufs.containsKey(t)) return
+        val mb = MixBuf(); mixBufs[t] = mb
+        val tmp = ThreadLocal<ShortArray>()
+        val sink = org.webrtc.AudioTrackSink { data, bits, rate, ch, frames, _ ->
+            if (bits != 16 || CamRec.recording == null || Prefs.recMix <= 0f) return@AudioTrackSink
+            var m = tmp.get(); if (m == null || m.size < frames) { m = ShortArray(maxOf(frames, 1024)); tmp.set(m) }
+            val d = data.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN); d.position(0)
+            val sb = d.asShortBuffer()
+            for (i in 0 until frames) {
+                var sum = 0
+                for (c in 0 until ch) sum += sb.get(i * ch + c)
+                m[i] = (sum / ch).toShort()
+            }
+            mb.put(m, frames, rate)
+        }
+        mixSinks[t] = sink
+        try { t.addSink(sink) } catch (e: Throwable) { Log.w(TAG, "addSink", e); mixBufs.remove(t); mixSinks.remove(t) }
+    }
+    private fun detachMix(t: AudioTrack?) {
+        t ?: return
+        val s = mixSinks.remove(t); mixBufs.remove(t)
+        if (s != null) try { t.removeSink(s) } catch (_: Throwable) {}
+    }
+    /** Dokłada zdalne głosy do kopii próbek mikrofonu przeznaczonej do nagrania wideo. */
+    private fun mixRemote(copy: ByteArray, rate: Int, channels: Int) {
+        val g = Prefs.recMix
+        if (g <= 0f || mixBufs.isEmpty()) return
+        val frames = copy.size / 2 / channels
+        if (frames <= 0) return
+        val acc = IntArray(frames)
+        for (mb in mixBufs.values) mb.addTo(acc, frames, rate, g)
+        val bb = java.nio.ByteBuffer.wrap(copy).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        for (i in 0 until frames) for (c in 0 until channels) {
+            val k = i * channels + c
+            bb.put(k, (bb.get(k) + acc[i]).coerceIn(-32768, 32767).toShort())
+        }
+    }
+
     private fun onMicData(format: Int, channels: Int, rate: Int, buf: ByteBuffer) {
         if (format != android.media.AudioFormat.ENCODING_PCM_16BIT) return
         val d = buf.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -265,7 +333,8 @@ object Engine {
         val sink = pcmSink; val note = noteSink
         if (sink != null || note != null) {
             val copy = ByteArray(n); d.get(copy); d.position(0)
-            sink?.invoke(copy, rate, channels); note?.invoke(copy, rate, channels)
+            if (sink != null) { val rec = copy.copyOf(); mixRemote(rec, rate, channels); sink.invoke(rec, rate, channels) }
+            note?.invoke(copy, rate, channels)
         }
         val g = if (role == Role.NONE) 1f else Prefs.micGain
         if (g == 1f) return
@@ -572,6 +641,7 @@ object Engine {
         l.closed = true
         links.remove(l.connId)
         closedBytes[0] += l.bytes[0]; closedBytes[1] += l.bytes[1]
+        detachMix(l.remote)
         val dc = l.dc; val pc = l.pc
         l.dc = null; l.pc = null
         try { dc?.unregisterObserver(); dc?.close() } catch (_: Exception) {}
@@ -681,6 +751,7 @@ object Engine {
     private fun onRemoteTrack(l: Link, t: MediaStreamTrack?) {
         if (t !is AudioTrack) return
         l.remote = t
+        attachMix(t)
         if (role == Role.COACH) athletes.values.firstOrNull { it.media === l }?.remote = t
         applyRemote()
     }
