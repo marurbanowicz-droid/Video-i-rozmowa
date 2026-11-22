@@ -66,7 +66,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             val img = cat("Obraz i nagrywanie", "rec")
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
-            img.sw("watermark", "Data i godzina na nagraniu", "Mały napis w prawym dolnym rogu, jak w rejestratorach jazdy.", true)
+            img.sw("watermark", "Czas GPS i odliczanie na nagraniu", "Czas każdej klatki (z GPS, co do milisekundy) w lewym górnym rogu i odliczanie ostatniej minuty w prawym – do synchronizacji z GPX.", true)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
                 arrayOf("OIS – optyczna (obiektyw)", "EIS – elektroniczna systemowa", "SUPER – jak Super Steady", "SUPER+H – Super + poziomy horyzont"),
                 arrayOf("off", "eis", "super", "superh"), Prefs.stabMode)
