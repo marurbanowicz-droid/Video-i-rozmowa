@@ -283,41 +283,30 @@ object Engine {
             rd = minOf(wr, rd + need)
         }
     }
-    private val mixBufs = java.util.concurrent.ConcurrentHashMap<AudioTrack, MixBuf>()
-    private val mixSinks = java.util.concurrent.ConcurrentHashMap<AudioTrack, org.webrtc.AudioTrackSink>()
-
-    private fun attachMix(t: AudioTrack) {
-        if (mixBufs.containsKey(t)) return
-        val mb = MixBuf(); mixBufs[t] = mb
-        val tmp = ThreadLocal<ShortArray>()
-        val sink = org.webrtc.AudioTrackSink { data, bits, rate, ch, frames, _ ->
-            if (bits != 16 || CamRec.recording == null || Prefs.recMix <= 0f) return@AudioTrackSink
-            var m = tmp.get(); if (m == null || m.size < frames) { m = ShortArray(maxOf(frames, 1024)); tmp.set(m) }
-            val d = data.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN); d.position(0)
-            val sb = d.asShortBuffer()
-            for (i in 0 until frames) {
-                var sum = 0
-                for (c in 0 until ch) sum += sb.get(i * ch + c)
-                m[i] = (sum / ch).toShort()
-            }
-            mb.put(m, frames, rate)
+    private val playMix = MixBuf()
+    private val playTmp = ShortArray(4096)
+    /** Odtwarzany dźwięk (to, co trener słyszy: wszyscy zawodnicy, z głośnościami i wyciszeniami). */
+    private fun onPlayback(samples: JavaAudioDeviceModule.AudioSamples) {
+        if (CamRec.recording == null || Prefs.recMix <= 0f) return
+        if (samples.audioFormat != android.media.AudioFormat.ENCODING_PCM_16BIT) return
+        val ch = maxOf(1, samples.channelCount)
+        val sb = java.nio.ByteBuffer.wrap(samples.data).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val frames = minOf(sb.limit() / ch, playTmp.size)
+        for (i in 0 until frames) {
+            var sum = 0
+            for (c in 0 until ch) sum += sb.get(i * ch + c)
+            playTmp[i] = (sum / ch).toShort()
         }
-        mixSinks[t] = sink
-        try { t.addSink(sink) } catch (e: Throwable) { Log.w(TAG, "addSink", e); mixBufs.remove(t); mixSinks.remove(t) }
-    }
-    private fun detachMix(t: AudioTrack?) {
-        t ?: return
-        val s = mixSinks.remove(t); mixBufs.remove(t)
-        if (s != null) try { t.removeSink(s) } catch (_: Throwable) {}
+        playMix.put(playTmp, frames, samples.sampleRate)
     }
     /** Dokłada zdalne głosy do kopii próbek mikrofonu przeznaczonej do nagrania wideo. */
     private fun mixRemote(copy: ByteArray, rate: Int, channels: Int) {
         val g = Prefs.recMix
-        if (g <= 0f || mixBufs.isEmpty()) return
+        if (g <= 0f) return
         val frames = copy.size / 2 / channels
         if (frames <= 0) return
         val acc = IntArray(frames)
-        for (mb in mixBufs.values) mb.addTo(acc, frames, rate, g)
+        playMix.addTo(acc, frames, rate, g)
         val bb = java.nio.ByteBuffer.wrap(copy).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
         for (i in 0 until frames) for (c in 0 until channels) {
             val k = i * channels + c
@@ -355,6 +344,7 @@ object Engine {
             .setUseHardwareNoiseSuppressor(ns && role == Role.ATHLETE && !athAsCoach)
             .apply { if (Prefs.recRaw && coachUi) setAudioSource(if (android.os.Build.VERSION.SDK_INT >= 24) 9 else 6) }   // UNPROCESSED / VOICE_RECOGNITION
             // surowy dźwięk z mikrofonu: najpierw kopia do nagrania (bez wzmocnienia), potem wzmocnienie wysyłanego głosu
+            .setPlaybackSamplesReadyCallback { onPlayback(it) }
             .setAudioRecordDataCallback { format, channels, rate, buf -> onMicData(format, channels, rate, buf) }
             .createAudioDeviceModule()
         adm = a
@@ -641,7 +631,6 @@ object Engine {
         l.closed = true
         links.remove(l.connId)
         closedBytes[0] += l.bytes[0]; closedBytes[1] += l.bytes[1]
-        detachMix(l.remote)
         val dc = l.dc; val pc = l.pc
         l.dc = null; l.pc = null
         try { dc?.unregisterObserver(); dc?.close() } catch (_: Exception) {}
@@ -751,7 +740,6 @@ object Engine {
     private fun onRemoteTrack(l: Link, t: MediaStreamTrack?) {
         if (t !is AudioTrack) return
         l.remote = t
-        attachMix(t)
         if (role == Role.COACH) athletes.values.firstOrNull { it.media === l }?.remote = t
         applyRemote()
     }
