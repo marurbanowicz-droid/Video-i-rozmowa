@@ -543,8 +543,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     private var logSession = -1
 
     // ---- napis z datą ----
-    private var textTex = 0; private var textSec = -1L; private var textAspect = 8f
-    private val textFmt = SimpleDateFormat("yyyy-MM-dd  HH:mm:ss", Locale.US)
+    // ---- czas i odliczanie wpalane w obraz ----
+    private val stamp = if (watermark) Stamp() else null
+    private var timeTex = 0; private var cdTex = 0; private var cdOn = false; private var cdUp = false
+    private val logsVideo = targets and CameraEffect.VIDEO_CAPTURE != 0
     private val txtBuf = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     init {
@@ -834,7 +836,6 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
             }
         }
         val rot = rotationFor()
-        if (watermark) updateText()
         val e = CamRec.userZoom
         val m = FrameMeta.find(ts)
         val fdNow = frameData(ts, tC, e, m)
@@ -857,12 +858,15 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val v = if (As != null) (if (videoOnly) (if (rawCal) null else videoV(fdNow, As, rot, corners)) else previewV(fdNow, As, rot, corners, dt)) else null
         val hs = homs(As, v, fdNow)
         val prog = progOes ?: return
+        val capNs = camToElapsedNs(ts)
+        updateStamp(capNs)
         for ((so, o) in outputs) {
             begin(o.es, so)
             drawWarp(prog, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texOes, o.pre, hs, stM)
-            drawText(so, o, rot)
+            drawStamp(so, o, rot)
             finish(o.es, ts)
         }
+        if (logsVideo) FrameLog.add(lastPts, capNs)
         if (videoOnly) logFrame(ts, lastPts, fdNow)
     }
 
@@ -964,43 +968,52 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val v = if (As != null && !rawCal) videoV(fd, As, rot, corners) else null
         val hs = homs(As, v, fd)
         val p = prog2d ?: return
+        // napis z czasem zrobienia tej (opóźnionej) klatki, nie z chwili rysowania
+        val capNs = camToElapsedNs(ringTs[idx])
+        updateStamp(capNs)
         for ((so, o) in outputs) {
             begin(o.es, so)
             drawWarp(p, GLES20.GL_TEXTURE_2D, ringTex[idx], o.pre, hs, I4)
-            drawText(so, o, rot)
+            drawStamp(so, o, rot)
             // znacznik czasu bieżący – nagranie jest równo przesunięte, a dźwięk wyrównany przy zapisie
             finish(o.es, ts)
         }
+        if (logsVideo) FrameLog.add(lastPts, capNs)
         logFrame(ringTs[idx], lastPts, fd)
         ringStart = (idx + 1) % n; ringCount -= pick + 1
     }
 
     // =========================================================================
-    // Data i godzina na obrazie
+    // Czas klatki i odliczanie na obrazie
     // =========================================================================
-    private fun updateText() {
-        val now = System.currentTimeMillis()
-        if (now / 1000 == textSec && textTex != 0) return
-        textSec = now / 1000
-        val s = textFmt.format(Date(now))
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; textSize = 48f; typeface = Typeface.MONOSPACE; setShadowLayer(4f, 0f, 2f, Color.BLACK)
-        }
-        val w = (p.measureText(s) + 12).toInt(); val h = 64
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(bmp).drawText(s, 6f, 50f, p)
-        if (textTex == 0) {
-            val t = IntArray(1); GLES20.glGenTextures(1, t, 0); textTex = t[0]
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textTex); texParams(GLES20.GL_TEXTURE_2D)
-        } else GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textTex)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
-        textAspect = w.toFloat() / h
-        bmp.recycle()
+    private fun upload(tex: Int, bmp: android.graphics.Bitmap, fresh: Boolean) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
+        if (fresh) { texParams(GLES20.GL_TEXTURE_2D); GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0) }
+        else GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bmp)
     }
 
-    /** Napis w prawym dolnym rogu obrazu „tak, jak go widzi widz” – niezależnie od ułożenia bufora wyjścia. */
-    private fun drawText(so: SurfaceOutput, o: Out, rot: Int) {
-        if (!watermark || textTex == 0 || progTxt == 0) return
+    /** Rysuje czas klatki (i odliczanie, gdy trwa) do tekstur – raz na klatkę, wspólne dla wszystkich wyjść. */
+    private fun updateStamp(capNs: Long) {
+        val st = stamp ?: return
+        val utc = GpsClock.utcMs(capNs)
+        st.drawTime(utc, GpsClock.gps)
+        val fresh = timeTex == 0
+        if (fresh) { val t = IntArray(2); GLES20.glGenTextures(2, t, 0); timeTex = t[0]; cdTex = t[1] }
+        upload(timeTex, st.timeBmp, fresh)
+        val cd = LastMinute.text(utc)
+        cdOn = cd != null
+        if (cd != null) { st.drawCountdown(cd); upload(cdTex, st.cdBmp, !cdUp); cdUp = true }
+    }
+
+    private fun drawStamp(so: SurfaceOutput, o: Out, rot: Int) {
+        val st = stamp ?: return
+        if (timeTex == 0 || progTxt == 0) return
+        drawQuad(so, o, rot, timeTex, st.timeAspect, 0.036f, right = false)
+        if (cdOn) drawQuad(so, o, rot, cdTex, st.cdAspect, 0.085f, right = true)
+    }
+
+    /** Prostokąt z teksturą w górnym rogu obrazu „tak, jak go widzi widz” – niezależnie od ułożenia bufora wyjścia. */
+    private fun drawQuad(so: SurfaceOutput, o: Out, rot: Int, tex: Int, aspect: Float, hFrac: Float, right: Boolean) {
         val ow = so.size.width.toFloat(); val oh = so.size.height.toFloat()
         val inv = FloatArray(16)
         if (!Matrix.invertM(inv, 0, o.pre, 0)) return
@@ -1013,13 +1026,16 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val r = outDir(rightAxis(rot)); val u = outDir(upAxis(rot))
         val halfR = if (r[0] != 0f) ow / 2 else oh / 2
         val halfU = if (u[0] != 0f) ow / 2 else oh / 2
-        val cx = ow / 2 + r[0] * halfR - u[0] * halfU
-        val cy = oh / 2 + r[1] * halfR - u[1] * halfU
-        val th = 0.026f * min(ow, oh); val tw = th * textAspect; val m = 0.02f * min(ow, oh)
-        val brx = cx - r[0] * m + u[0] * m; val bry = cy - r[1] * m + u[1] * m
-        val blx = brx - r[0] * tw; val bly = bry - r[1] * tw
-        val trx = brx + u[0] * th; val tr_y = bry + u[1] * th
-        val tlx = blx + u[0] * th; val tly = bly + u[1] * th
+        val th = hFrac * min(ow, oh); val tw = th * aspect; val m = 0.02f * min(ow, oh)
+        val sx = if (right) 1f else -1f
+        // narożnik obrazu (lewy albo prawy górny), wcięty o margines
+        val cx = ow / 2 + sx * r[0] * halfR + u[0] * halfU - sx * r[0] * m - u[0] * m
+        val cy = oh / 2 + sx * r[1] * halfR + u[1] * halfU - sx * r[1] * m - u[1] * m
+        // lewy górny róg napisu
+        val tlx = if (right) cx - r[0] * tw else cx; val tly = if (right) cy - r[1] * tw else cy
+        val trx = tlx + r[0] * tw; val tr_y = tly + r[1] * tw
+        val blx = tlx - u[0] * th; val bly = tly - u[1] * th
+        val brx = trx - u[0] * th; val bry = tr_y - u[1] * th
         fun nx(x: Float) = x / ow * 2 - 1
         fun ny(y: Float) = y / oh * 2 - 1
         txtBuf.clear()
@@ -1032,7 +1048,7 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUseProgram(progTxt)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textTex)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
         txtBuf.position(0)
         GLES20.glEnableVertexAttribArray(txtPos); GLES20.glVertexAttribPointer(txtPos, 2, GLES20.GL_FLOAT, false, 16, txtBuf)
         txtBuf.position(2)

@@ -99,13 +99,12 @@ object CamRec {
     @Volatile var videoDelayMs = 0
     private var overlay: OverlayEffect? = null
     private val overlayThread by lazy { android.os.HandlerThread("watermark").apply { start() } }
-    private val stampFmt = java.text.SimpleDateFormat("yyyy-MM-dd  HH:mm:ss", java.util.Locale.US)
-    private var stampSec = 0L
-    private var stampText = ""
-    private val stampPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE; typeface = android.graphics.Typeface.MONOSPACE
-        setShadowLayer(4f, 0f, 1f, android.graphics.Color.BLACK)
-    }
+    private val ovStamp by lazy { Stamp() }
+    private val ovRect = android.graphics.RectF()
+    private val ovPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    /** Dane o czasie zakończonych nagrań – do zapisu pliku (klucz: nazwa robocza). */
+    private val recTimes = java.util.concurrent.ConcurrentHashMap<String, RecTime>()
+    private var recStartNs = 0L
     private var appCtx: Context? = null
     /** Aktualny zoom (czytany przez tryb Sport z innego wątku). */
     @Volatile var curZoom = 1f; private set
@@ -331,7 +330,7 @@ object CamRec {
         scheduleSleep()
     }
 
-    /** Data i godzina małą czcionką w prawym dolnym rogu obrazu (podgląd i nagranie). */
+    /** Czas klatki (GPS) i odliczanie ostatniej minuty w górnych rogach obrazu (podgląd i nagranie) – tryb bez efektów GL. */
     private fun makeWatermark(): OverlayEffect {
         val eff = OverlayEffect(CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE, 0, android.os.Handler(overlayThread.looper)) { t -> Log.e(TAG, "overlay", t) }
         eff.setOnDrawListener { frame ->
@@ -346,11 +345,22 @@ object CamRec {
                 270 -> { c.translate(w, 0f); c.rotate(90f) }
             }
             val uw = if (rot % 180 == 0) w else h; val uh = if (rot % 180 == 0) h else w
-            val now = System.currentTimeMillis()
-            if (now / 1000 != stampSec) { stampSec = now / 1000; stampText = stampFmt.format(java.util.Date(now)) }
-            stampPaint.textSize = minOf(uw, uh) * 0.026f
-            val m = minOf(uw, uh) * 0.02f
-            c.drawText(stampText, uw - m - stampPaint.measureText(stampText), uh - m, stampPaint)
+            // czas zrobienia klatki (nie chwila rysowania), lewy górny róg; odliczanie w prawym górnym
+            val capNs = camToElapsedNs(frame.timestampNanos)
+            FrameLog.add(frame.timestampNanos, capNs)
+            val utc = GpsClock.utcMs(capNs)
+            val st = ovStamp
+            val mn = minOf(uw, uh); val m = mn * 0.02f
+            st.drawTime(utc, GpsClock.gps)
+            var th = mn * 0.036f
+            ovRect.set(m, m, m + th * st.timeAspect, m + th)
+            c.drawBitmap(st.timeBmp, null, ovRect, ovPaint)
+            LastMinute.text(utc)?.let { cd ->
+                st.drawCountdown(cd)
+                th = mn * 0.085f
+                ovRect.set(uw - m - th * st.cdAspect, m, uw - m, m + th)
+                c.drawBitmap(st.cdBmp, null, ovRect, ovPaint)
+            }
             c.restore()
             true
         }
@@ -424,6 +434,7 @@ object CamRec {
         }
         if (recording != null) return false
         val app = ctx.applicationContext
+        GpsClock.start(app)
         val dir = recDir(app)
         val free = try { dir.usableSpace } catch (_: Exception) { Long.MAX_VALUE }
         if (free < 300L * 1024 * 1024) {
@@ -441,14 +452,25 @@ object CamRec {
         val sink: (ByteArray, Int, Int) -> Unit = { data, sr, ch -> pw.write(data, sr, ch) }
         inUse.add(base)
         Motion.setFast(true)
+        FrameLog.start()
+        recStartNs = android.os.SystemClock.elapsedRealtimeNanos()
         try {
             recording = vc.output.prepareRecording(app, FileOutputOptions.Builder(vFile).build())
                 .start(ContextCompat.getMainExecutor(app)) { ev ->
                     when (ev) {
-                        is VideoRecordEvent.Start -> { recStartedAt = System.currentTimeMillis(); pw.activate(); notifyChange() }
+                        is VideoRecordEvent.Start -> { recStartedAt = System.currentTimeMillis(); recStartNs = android.os.SystemClock.elapsedRealtimeNanos(); pw.activate(); notifyChange() }
                         is VideoRecordEvent.Finalize -> {
                             if (Engine.pcmSink === sink) Engine.pcmSink = null
                             pw.close()
+                            val (lp, lc) = FrameLog.stop()
+                            val lmS = LastMinute.startUtc
+                            val recEndUtc = GpsClock.nowUtc()
+                            val recBegUtc = GpsClock.utcMs(recStartNs)
+                            // odliczanie dołączamy, gdy jego czas (minuta przed startem … 15 min po) zachodzi na nagranie
+                            val lmUse = lmS != 0L && lmS - 61_000L <= recEndUtc && lmS + LastMinute.HOLD_MS >= recBegUtc
+                            recTimes[base] = RecTime(lp, lc, recStartNs, videoDelayMs,
+                                if (lmUse) LastMinute.pressedUtc else 0L, if (lmUse) lmS else 0L,
+                                if (lmUse) LastMinute.corrections.toList() else emptyList(), Prefs.stabMode)
                             StabLog.stop()
                             recording = null
                             Motion.setFast(false)
@@ -501,13 +523,27 @@ object CamRec {
         var suffix = ""; var delayMs = 0L
         try { File(dir, "$base.info").readText().trim().split(";").let { suffix = it[0]; delayMs = it.getOrNull(1)?.toLongOrNull() ?: 0L } } catch (_: Exception) {}
         var audioMissing = false
+        // czas pierwszej klatki (GPS) i JSON – trafiają do pliku MP4 i obok niego
+        val rt = recTimes.remove(base)
+        val fileName = Muxer.fileName(started, suffix)
+        if (rt != null) try {
+            val (pts, dur, n) = RecTime.filePts(vFile)
+            rt.build(fileName, pts, dur, n)
+        } catch (e: Throwable) { Log.w(TAG, "time meta", e) }
+        val stamp: ((java.io.FileDescriptor) -> Unit)? = if (rt != null && rt.firstUtc > 0) { fd -> Mp4Stamp.apply(fd, rt.firstUtc, rt.json) } else null
         val uri: Uri? = try {
             // obraz opóźniony o delayMs – dźwięk przesuwamy o tyle samo
-            Muxer.mux(app, vFile, pcm, sr, ch, Prefs.audioOffsetMs + delayMs, started, suffix)
+            Muxer.mux(app, vFile, pcm, sr, ch, Prefs.audioOffsetMs + delayMs, started, suffix, stamp)
         } catch (e: Throwable) {
             Log.e(TAG, "mux", e)
-            try { Muxer.saveVideoOnly(app, vFile, started, suffix).also { audioMissing = true } } catch (e2: Throwable) { Log.e(TAG, "copy", e2); null }
+            try { Muxer.saveVideoOnly(app, vFile, started, suffix, stamp).also { audioMissing = true } } catch (e2: Throwable) { Log.e(TAG, "copy", e2); null }
         }
+        val json = rt?.json
+        if (uri != null && json != null) try {
+            val tmp = File(dir, "$base.time.json"); tmp.writeText(json)
+            VoiceNote.saveFile(app, fileName.removeSuffix(".mp4") + ".json", "application/json", tmp, audio = false, sub = "Czas nagrań")
+            tmp.delete()
+        } catch (e: Throwable) { Log.w(TAG, "json", e) }
         when {
             uri != null -> {
                 val log = File(dir, "$base.gyro.csv")

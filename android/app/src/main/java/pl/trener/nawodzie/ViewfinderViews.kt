@@ -20,6 +20,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 const val ACCENT = 0xFFFFD60A.toInt()   // żółty jak w aparatach
+const val BRICK = 0xFFA2543F.toInt()    // odliczanie ostatniej minuty
 
 /** Pokrętło zoomu w stylu aparatu: łuk z podziałką, przeciąganie w bok obraca pokrętło (skala logarytmiczna). */
 class ZoomDial(ctx: Context) : View(ctx) {

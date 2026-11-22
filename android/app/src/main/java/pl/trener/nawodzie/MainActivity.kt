@@ -213,7 +213,7 @@ class MainActivity : AppCompatActivity() {
             SessionService.start(this, coach = true, camera = granted(Manifest.permission.CAMERA))
             startActivity(Intent(this, CoachActivity::class.java))
         }
-        perms.launch((basePerms() + Manifest.permission.CAMERA).toTypedArray())
+        perms.launch((basePerms() + Manifest.permission.CAMERA + Manifest.permission.ACCESS_FINE_LOCATION + Manifest.permission.ACCESS_COARSE_LOCATION).toTypedArray())
     }
 
     private fun askAndStartAthlete(code: String, name: String, asCoach: Boolean = false) {
@@ -227,6 +227,6 @@ class MainActivity : AppCompatActivity() {
             SessionService.start(this, coach = asCoach, camera = cam)
             startActivity(Intent(this, if (asCoach) CoachActivity::class.java else AthleteActivity::class.java))
         }
-        perms.launch((if (asCoach) basePerms() + Manifest.permission.CAMERA else basePerms()).toTypedArray())
+        perms.launch((if (asCoach) basePerms() + Manifest.permission.CAMERA + Manifest.permission.ACCESS_FINE_LOCATION + Manifest.permission.ACCESS_COARSE_LOCATION else basePerms()).toTypedArray())
     }
 }

@@ -63,6 +63,24 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         override fun onDisplayChanged(displayId: Int) { CamRec.setRotation(rot()) }
     }
     private val ticker = object : Runnable { override fun run() { updateRecTime(); mainHandler.postDelayed(this, 500) } }
+    private lateinit var lmIdle: View
+    private lateinit var lmText: TextView
+    private lateinit var lmGap: View
+    private lateinit var lmRow: View
+    private var lmBurned = true
+    private val lmTick = object : Runnable { override fun run() { updateLm(); mainHandler.postDelayed(this, if (lmText.visibility == View.VISIBLE) 40 else 300) } }
+
+    /** Przycisk albo korekty odliczania; samo odliczanie widać w obrazie (wpalone), a gdy nie – w osobnym polu. */
+    private fun updateLm() {
+        if (!::lmIdle.isInitialized) return
+        val t = LastMinute.text(GpsClock.nowUtc())
+        val on = t != null
+        lmIdle.visibility = if (on) View.GONE else View.VISIBLE
+        lmRow.visibility = if (on) View.VISIBLE else View.GONE
+        lmText.visibility = if (on && !lmBurned) View.VISIBLE else View.GONE
+        lmGap.visibility = if (on && lmBurned) View.VISIBLE else View.GONE
+        if (on && !lmBurned) lmText.text = t
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +108,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         CamRec.setUiVisible(true)
         try { getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(displayListener, mainHandler) } catch (_: Exception) {}
         mainHandler.post(ticker)
+        GpsClock.start(this)
+        mainHandler.post(lmTick)
         syncZoom()
     }
 
@@ -99,6 +119,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         CamRec.setSurface(null)
         CamRec.setUiVisible(false)
         mainHandler.removeCallbacks(ticker)
+        mainHandler.removeCallbacks(lmTick)
+        if (CamRec.recording == null) GpsClock.stop()
         super.onStop()
     }
 
@@ -260,6 +282,49 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             setOnClickListener { if (Engine.allMute) Engine.setAllMute(false) else if (Engine.fullMute) Engine.toggleFullMute() else Engine.setSolo(null) }
         }
         root.addView(muteBanner, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = (if (landscape) 0 else band) + dp(10) })
+
+        // ---- ostatnia minuta: przycisk i korekty w prawym górnym rogu obrazu (pod wpalonym odliczaniem) ----
+        val pvL = if (landscape) band else 0; val pvT = if (landscape) 0 else band
+        val pvW = if (landscape) minOf((sh * ratio).toInt(), sw - band) else sw
+        val pvH = if (landscape) sh else minOf((sw * ratio).toInt(), sh - band)
+        // poziomo przy 16:9 prawy brzeg obrazu leży pod przyciskami – wtedy odliczanie pokazujemy osobno, obok nich
+        val coverR = if (landscape) maxOf(0, pvL + pvW - (sw - dp(96) - dp(118))) else 0
+        lmBurned = Prefs.watermark && coverR == 0
+        val mn = minOf(pvW, pvH); val mPx = (mn * 0.02f).toInt()
+        val mono = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+        lmIdle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            background = GradientDrawable().apply { setColor(Color.parseColor("#99000000")); cornerRadius = dp(10).toFloat(); setStroke(dp(2), BRICK) }
+            setPadding(dp(14), dp(5), dp(14), dp(6))
+            contentDescription = "Ostatnia minuta: wciśnij na sygnał minuty do startu"
+            setOnClickListener { LastMinute.press(); updateLm() }
+            addView(text("1:00", 22f, Color.WHITE, bold = true).apply { typeface = mono; gravity = Gravity.CENTER })
+            addView(text("Ostatnia minuta", 11f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER })
+        }
+        lmText = text("", 26f, Color.WHITE, bold = true).apply {
+            typeface = mono; background = roundBg(BRICK, dp(8).toFloat()); setPadding(dp(12), dp(3), dp(12), dp(3)); visibility = View.GONE
+        }
+        lmGap = View(this).apply { visibility = View.GONE }
+        fun lmBtn(t: String, desc: String, f: () -> Unit) = text(t, 14f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER; background = roundBg(Color.parseColor("#8C000000"), dp(20).toFloat())
+            contentDescription = desc; setOnClickListener { f(); updateLm() }
+            layoutParams = LinearLayout.LayoutParams(dp(if (t == "×") 44 else 54), dp(40)).apply { marginStart = dp(6) }
+        }
+        lmRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; visibility = View.GONE
+            addView(lmBtn("−1 s", "Odliczanie o sekundę krócej") { LastMinute.adjust(-1) })
+            addView(lmBtn("+1 s", "Odliczanie o sekundę dłużej") { LastMinute.adjust(1) })
+            addView(lmBtn("×", "Wyłącz odliczanie") { LastMinute.cancel() })
+        }
+        val lmBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.END
+            addView(lmIdle); addView(lmText)
+            addView(lmGap, LinearLayout.LayoutParams(1, (mn * 0.085f).toInt()))
+            addView(lmRow, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+        }
+        val lmOver = FrameLayout(this)
+        lmOver.addView(lmBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = mPx; rightMargin = mPx + coverR })
+        root.addView(lmOver, FrameLayout.LayoutParams(pvW, pvH).apply { leftMargin = pvL; topMargin = pvT })
 
         // ---- zoom i przyciski ----
         presets = LinearLayout(this).apply { orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
