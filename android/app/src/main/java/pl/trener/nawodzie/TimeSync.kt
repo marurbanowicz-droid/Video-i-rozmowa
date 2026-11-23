@@ -118,16 +118,18 @@ object LastMinute {
     /** Czy coś jest pokazywane w chwili [utc]. */
     fun shownAt(utc: Long): Boolean { val s = startUtc; return s != 0L && utc - s <= HOLD_MS }
 
-    /** „0:42.37” przed startem, „+0:05.08” po starcie; null gdy nic do pokazania. */
+    /** „0:42” przed startem, „0:09.37” w ostatnich 10 s, „+0:05” po starcie; null gdy nic do pokazania. */
     fun text(utc: Long): String? {
         val s = startUtc
         if (s == 0L) return null
         val d = s - utc
         if (-d > HOLD_MS) return null
-        val after = d <= 0
-        val cs = abs(d) / 10
-        return String.format(Locale.US, "%s%d:%02d.%02d", if (after) "+" else "", cs / 6000, (cs / 100) % 60, cs % 100)
+        if (d <= 0) { val sec = -d / 1000; return "+" + mmss(sec) }
+        if (d < 10_000) { val cs = d / 10; return "0:0" + (cs / 100) + "." + two((cs % 100).toInt()) }
+        return mmss((d + 999) / 1000)   // pełne sekundy zaokrąglone w górę: 0:11 → 0:10 → 0:09.99
     }
+    private fun two(v: Int) = if (v < 10) "0$v" else v.toString()
+    private fun mmss(sec: Long) = (sec / 60).toString() + ":" + two((sec % 60).toInt())
 }
 
 /**
@@ -145,6 +147,8 @@ class Stamp {
     private val r = RectF()
 
     private val tW = tP.measureText("00:00:00.000")
+    private var tzMin = -1L; private var tzOff = 0L
+    private val tChars = "00:00:00.000".toCharArray()
     val timeBmp: Bitmap = Bitmap.createBitmap((14 + tW + 12 + tagP.measureText("GPS") + 14).toInt(), 64, Bitmap.Config.ARGB_8888)
     private val tC = Canvas(timeBmp)
     private val bigW = bigP.measureText("+00:00"); private val smW = smallP.measureText(".00")
@@ -159,10 +163,17 @@ class Stamp {
         bgP.color = 0x8C000000.toInt()
         r.set(0f, 0f, timeBmp.width.toFloat(), timeBmp.height.toFloat())
         tC.drawRoundRect(r, 10f, 10f, bgP)
-        val local = utc + TimeZone.getDefault().getOffset(utc)
+        if (utc / 60_000 != tzMin) { tzMin = utc / 60_000; tzOff = TimeZone.getDefault().getOffset(utc).toLong() }
+        val local = utc + tzOff
         val ms = Math.floorMod(local, 86_400_000L)
-        val s = String.format(Locale.US, "%02d:%02d:%02d.%03d", ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
-        tC.drawText(s, 14f, 47f, tP)
+        val c = tChars; var v = ms
+        val msPart = (v % 1000).toInt(); v /= 1000
+        val sec = (v % 60).toInt(); v /= 60
+        val min = (v % 60).toInt(); val hr = (v / 60).toInt()
+        c[0] = '0' + hr / 10; c[1] = '0' + hr % 10; c[3] = '0' + min / 10; c[4] = '0' + min % 10
+        c[6] = '0' + sec / 10; c[7] = '0' + sec % 10
+        c[9] = '0' + msPart / 100; c[10] = '0' + (msPart / 10) % 10; c[11] = '0' + msPart % 10
+        tC.drawText(c, 0, 12, 14f, 47f, tP)
         tagP.color = if (gps) 0xFF9FE3A8.toInt() else 0xFFFFD60A.toInt()
         tC.drawText(if (gps) "GPS" else "SYS", 14f + tW + 12f, 45f, tagP)
     }

@@ -545,7 +545,10 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
     // ---- napis z datą ----
     // ---- czas i odliczanie wpalane w obraz ----
     private val stamp = if (watermark) Stamp() else null
-    private var timeTex = 0; private var cdTex = 0; private var cdOn = false; private var cdUp = false
+    // tekstury napisów po 3 na zmianę: nowy napis nie czeka, aż karta graficzna skończy rysować poprzednią klatkę
+    private val timeTex = IntArray(3); private val cdTex = IntArray(3)
+    private var tI = 0; private var cI = 0; private var cdOn = false; private var cdLast: String? = null
+    private val timeUp = BooleanArray(3); private val cdUp = BooleanArray(3)
     private val logsVideo = targets and CameraEffect.VIDEO_CAPTURE != 0
     private val txtBuf = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
@@ -997,19 +1000,21 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val st = stamp ?: return
         val utc = GpsClock.utcMs(capNs)
         st.drawTime(utc, GpsClock.gps)
-        val fresh = timeTex == 0
-        if (fresh) { val t = IntArray(2); GLES20.glGenTextures(2, t, 0); timeTex = t[0]; cdTex = t[1] }
-        upload(timeTex, st.timeBmp, fresh)
+        if (timeTex[0] == 0) { GLES20.glGenTextures(3, timeTex, 0); GLES20.glGenTextures(3, cdTex, 0) }
+        tI = (tI + 1) % 3
+        upload(timeTex[tI], st.timeBmp, !timeUp[tI]); timeUp[tI] = true
         val cd = LastMinute.text(utc)
         cdOn = cd != null
-        if (cd != null) { st.drawCountdown(cd); upload(cdTex, st.cdBmp, !cdUp); cdUp = true }
+        // odliczanie zmienia się raz na sekundę (poza ostatnimi 10 s) – rysujemy tylko, gdy tekst inny
+        if (cd != null && cd != cdLast) { st.drawCountdown(cd); cI = (cI + 1) % 3; upload(cdTex[cI], st.cdBmp, !cdUp[cI]); cdUp[cI] = true }
+        cdLast = cd
     }
 
     private fun drawStamp(so: SurfaceOutput, o: Out, rot: Int) {
         val st = stamp ?: return
-        if (timeTex == 0 || progTxt == 0) return
-        drawQuad(so, o, rot, timeTex, st.timeAspect, 0.036f, right = false)
-        if (cdOn) drawQuad(so, o, rot, cdTex, st.cdAspect, 0.085f, right = true)
+        if (timeTex[0] == 0 || progTxt == 0) return
+        drawQuad(so, o, rot, timeTex[tI], st.timeAspect, 0.036f, right = false)
+        if (cdOn) drawQuad(so, o, rot, cdTex[cI], st.cdAspect, 0.085f, right = true)
     }
 
     /** Prostokąt z teksturą w górnym rogu obrazu „tak, jak go widzi widz” – niezależnie od ułożenia bufora wyjścia. */

@@ -101,6 +101,7 @@ object CamRec {
     private val overlayThread by lazy { android.os.HandlerThread("watermark").apply { start() } }
     private val ovStamp by lazy { Stamp() }
     private val ovRect = android.graphics.RectF()
+    private var ovCdLast: String? = null
     private val ovPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
     /** Dane o czasie zakończonych nagrań – do zapisu pliku (klucz: nazwa robocza). */
     private val recTimes = java.util.concurrent.ConcurrentHashMap<String, RecTime>()
@@ -356,7 +357,7 @@ object CamRec {
             ovRect.set(m, m, m + th * st.timeAspect, m + th)
             c.drawBitmap(st.timeBmp, null, ovRect, ovPaint)
             LastMinute.text(utc)?.let { cd ->
-                st.drawCountdown(cd)
+                if (cd != ovCdLast) { st.drawCountdown(cd); ovCdLast = cd }
                 th = mn * 0.085f
                 ovRect.set(uw - m - th * st.cdAspect, m, uw - m, m + th)
                 c.drawBitmap(st.cdBmp, null, ovRect, ovPaint)
