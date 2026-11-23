@@ -159,7 +159,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
                 SessionService.endSession(requireContext()); activity?.finish()
             }
         }
-        cat("Diagnostyka", "dev").action("Zużycie procesora", "Które części aplikacji pracują najwięcej – pomaga znaleźć przyczynę rozładowywania baterii") { showCpu() }
+        cat("Diagnostyka", "dev").action("Zużycie procesora i połączenia", "Które części aplikacji pracują najwięcej oraz dziennik zerwań połączeń z zawodnikami") { showCpu() }
         if (sec == null) {
             // ekran główny: lista działów, każdy otwiera się osobno
             for ((c, _) in cats) screen.removePreference(c)

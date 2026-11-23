@@ -468,10 +468,10 @@ object CamRec {
                             val recEndUtc = GpsClock.nowUtc()
                             val recBegUtc = GpsClock.utcMs(recStartNs)
                             // odliczanie dołączamy, gdy jego czas (minuta przed startem … 15 min po) zachodzi na nagranie
-                            val lmUse = lmS != 0L && lmS - 61_000L <= recEndUtc && lmS + LastMinute.HOLD_MS >= recBegUtc
+                            val lmUse = lmS != 0L && lmS - 120_000L <= recEndUtc && lmS + LastMinute.HOLD_MS >= recBegUtc
                             recTimes[base] = RecTime(lp, lc, recStartNs, videoDelayMs,
                                 if (lmUse) LastMinute.pressedUtc else 0L, if (lmUse) lmS else 0L,
-                                if (lmUse) LastMinute.corrections.toList() else emptyList(), Prefs.stabMode)
+                                if (lmUse) LastMinute.syncs.toList() else emptyList(), Prefs.stabMode)
                             StabLog.stop()
                             recording = null
                             Motion.setFast(false)

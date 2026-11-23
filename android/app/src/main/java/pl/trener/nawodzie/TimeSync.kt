@@ -100,31 +100,38 @@ object GpsClock : LocationListener {
 
 /** Odliczanie ostatniej minuty przed startem (wciśnięte na sygnał 1 minuty) i czas od startu przez 15 minut. */
 object LastMinute {
-    const val HOLD_MS = 15 * 60_000L
+    const val HOLD_MS = 60 * 60_000L      // czas od startu pokazywany przez godzinę
     @Volatile var startUtc = 0L; private set      // 0 – wyłączone
     @Volatile var pressedUtc = 0L; private set
-    val corrections = CopyOnWriteArrayList<Int>()
+    /** Synchronizacje na sygnał 30 s / 15 s: (czas UTC wciśnięcia, sekund do startu). */
+    val syncs = CopyOnWriteArrayList<Pair<Long, Int>>()
     var onChange: (() -> Unit)? = null
 
     fun press() {
-        pressedUtc = GpsClock.nowUtc(); startUtc = pressedUtc + 60_000L; corrections.clear(); onChange?.invoke()
+        pressedUtc = GpsClock.nowUtc(); startUtc = pressedUtc + 60_000L; syncs.clear(); onChange?.invoke()
     }
-    fun adjust(s: Int) {
+    /** Sygnał „30 s” albo „15 s” do startu: start = teraz + [sec]. */
+    fun sync(sec: Int) {
         if (startUtc == 0L) return
-        startUtc += s * 1000L; corrections.add(s); onChange?.invoke()
+        val now = GpsClock.nowUtc()
+        startUtc = now + sec * 1000L; syncs.add(now to sec); onChange?.invoke()
     }
-    fun cancel() { startUtc = 0L; corrections.clear(); onChange?.invoke() }
+    fun cancel() { startUtc = 0L; syncs.clear(); onChange?.invoke() }
 
     /** Czy coś jest pokazywane w chwili [utc]. */
     fun shownAt(utc: Long): Boolean { val s = startUtc; return s != 0L && utc - s <= HOLD_MS }
 
-    /** „0:42” przed startem, „0:09.37” w ostatnich 10 s, „+0:05” po starcie; null gdy nic do pokazania. */
+    /** „0:42” przed startem, „0:09.37” w ostatnich 10 s, „+0:03.21” w pierwszych 10 s po starcie, potem „+0:15”; null gdy nic do pokazania. */
     fun text(utc: Long): String? {
         val s = startUtc
         if (s == 0L) return null
         val d = s - utc
         if (-d > HOLD_MS) return null
-        if (d <= 0) { val sec = -d / 1000; return "+" + mmss(sec) }
+        if (d <= 0) {
+            val a = -d
+            if (a < 10_000) { val cs = a / 10; return "+0:0" + (cs / 100) + "." + two((cs % 100).toInt()) }
+            return "+" + mmss(a / 1000)
+        }
         if (d < 10_000) { val cs = d / 10; return "0:0" + (cs / 100) + "." + two((cs % 100).toInt()) }
         return mmss((d + 999) / 1000)   // pełne sekundy zaokrąglone w górę: 0:11 → 0:10 → 0:09.99
     }
@@ -138,6 +145,7 @@ object LastMinute {
  * Każdy wątek rysujący ma własny egzemplarz.
  */
 class Stamp {
+    companion object { const val GREEN = 0xFF2E7D4F.toInt() }
     private val tP = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL); textSize = 44f; color = Color.WHITE }
     private val tagP = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD); textSize = 26f }
     private val bigP = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD); textSize = 96f; color = Color.WHITE }
@@ -180,7 +188,7 @@ class Stamp {
 
     fun drawCountdown(text: String) {
         cdBmp.eraseColor(Color.TRANSPARENT)
-        bgP.color = 0xFFA2543F.toInt()
+        bgP.color = if (text.startsWith("+")) GREEN else 0xFFA2543F.toInt()   // ceglasty przed startem, zielony po
         r.set(0f, 0f, cdBmp.width.toFloat(), cdBmp.height.toFloat())
         cC.drawRoundRect(r, 16f, 16f, bgP)
         val dot = text.indexOf('.')
@@ -215,7 +223,7 @@ class RecTime(
     val logPts: LongArray, val logCap: LongArray,
     val startHintNs: Long,           // elapsedRealtime chwili, gdy nagrywanie się zaczęło
     val delayMs: Int,                // opóźnienie obrazu (wyprzedzenie stabilizacji)
-    val lmPressed: Long, val lmStart: Long, val lmCorr: List<Int>,
+    val lmPressed: Long, val lmStart: Long, val lmSyncs: List<Pair<Long, Int>>,
     val stab: String,
 ) {
     var firstUtc = 0L; private set
@@ -247,7 +255,7 @@ class RecTime(
         o.put("stabilization", stab)
         if (lmStart != 0L) o.put("last_minute", JSONObject().apply {
             put("pressed_utc", iso(lmPressed))
-            put("corrections_s", JSONArray(lmCorr))
+            put("syncs", JSONArray().apply { lmSyncs.forEach { (t, sec) -> put(JSONObject().put("at_utc", iso(t)).put("to_start_s", sec)) } })
             put("start_utc", iso(lmStart))
             put("start_unix_ms", lmStart)
         })
