@@ -79,7 +79,13 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         lmRow.visibility = if (on) View.VISIBLE else View.GONE
         lmText.visibility = if (on && !lmBurned) View.VISIBLE else View.GONE
         lmGap.visibility = if (on && lmBurned) View.VISIBLE else View.GONE
-        if (on && !lmBurned) lmText.text = t
+        // synchronizacja 30 s / 15 s ma sens tylko przed startem
+        val before = on && !t!!.startsWith("+")
+        (lmRow as LinearLayout).let { it.getChildAt(0).visibility = if (before) View.VISIBLE else View.GONE; it.getChildAt(1).visibility = if (before) View.VISIBLE else View.GONE }
+        if (on && !lmBurned) {
+            lmText.text = t
+            (lmText.background as? GradientDrawable)?.setColor(if (t!!.startsWith("+")) Stamp.GREEN else BRICK)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -312,8 +318,8 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         }
         lmRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; visibility = View.GONE
-            addView(lmBtn("−1 s", "Odliczanie o sekundę krócej") { LastMinute.adjust(-1) })
-            addView(lmBtn("+1 s", "Odliczanie o sekundę dłużej") { LastMinute.adjust(1) })
+            addView(lmBtn("0:30", "Sygnał 30 sekund do startu – wyrównaj odliczanie") { LastMinute.sync(30) })
+            addView(lmBtn("0:15", "Sygnał 15 sekund do startu – wyrównaj odliczanie") { LastMinute.sync(15) })
             addView(lmBtn("×", "Wyłącz odliczanie") { LastMinute.cancel() })
         }
         val lmBox = LinearLayout(this).apply {

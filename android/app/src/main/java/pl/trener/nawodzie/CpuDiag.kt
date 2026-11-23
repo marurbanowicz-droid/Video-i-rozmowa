@@ -86,6 +86,7 @@ object CpuDiag {
             sb.append('\n')
         }
         if (total - live > HZ) sb.append(fmt(total - live)).append(" – wątki już zakończone\n")
+        sb.append(ConnLog.report())
         return sb.toString()
     }
 }

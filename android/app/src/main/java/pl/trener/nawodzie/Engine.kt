@@ -776,6 +776,8 @@ object Engine {
     private fun setOnline(a: Athlete) {
         val prev = a.status
         a.status = "online"; a.badSince = 0
+        ConnLog.app = app
+        ConnLog.online(a.name, a.media?.pc)
         when (prev) {
             "offline" -> Notifier.event("back", "${a.name} wraca")
             "connecting" -> Notifier.event("join", "${a.name} dołącza")
@@ -790,8 +792,16 @@ object Engine {
     private fun goOffline(a: Athlete) {
         if (a.status == "offline") { val m = a.media; a.media = null; a.remote = null; closeLink(m); return }
         val prev = a.status
-        val m = a.media; a.media = null; a.remote = null; closeLink(m)
+        val m = a.media
+        val why = when {
+            m == null -> "brak połączenia głosowego"
+            m.ice == IceConnectionState.FAILED -> "ICE: nieudane"
+            m.ice == IceConnectionState.CLOSED -> "zamknięte"
+            else -> "brak odpowiedzi ${(now() - a.badSince) / 1000} s, ICE: ${m.ice.name.lowercase()}"
+        }
+        a.media = null; a.remote = null; closeLink(m)
         if (prev == "connecting" && !a.wasOnline) { dropAthlete(a.cid); return }
+        ConnLog.app = app; ConnLog.lost(a.name, why)
         a.status = "offline"; a.offlineSince = now()
         Notifier.event("leave", "Utracono połączenie: ${a.name}")
         snapshot(); changed(); broadcastRoster()
