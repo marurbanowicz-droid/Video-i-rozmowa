@@ -1032,10 +1032,12 @@ void main() { gl_FragColor = texture2D(sTex, vT); }"""
         val halfR = if (r[0] != 0f) ow / 2 else oh / 2
         val halfU = if (u[0] != 0f) ow / 2 else oh / 2
         val th = hFrac * min(ow, oh); val tw = th * aspect; val m = 0.02f * min(ow, oh)
+        // odliczanie (prawa strona) odsunięte od brzegu o 9% szerokości – w podglądzie poziomym nie chowa się pod przyciskami zoomu
+        val mh = if (right) max(m, 0.09f * 2 * halfR) else m
         val sx = if (right) 1f else -1f
         // narożnik obrazu (lewy albo prawy górny), wcięty o margines
-        val cx = ow / 2 + sx * r[0] * halfR + u[0] * halfU - sx * r[0] * m - u[0] * m
-        val cy = oh / 2 + sx * r[1] * halfR + u[1] * halfU - sx * r[1] * m - u[1] * m
+        val cx = ow / 2 + sx * r[0] * halfR + u[0] * halfU - sx * r[0] * mh - u[0] * m
+        val cy = oh / 2 + sx * r[1] * halfR + u[1] * halfU - sx * r[1] * mh - u[1] * m
         // lewy górny róg napisu
         val tlx = if (right) cx - r[0] * tw else cx; val tly = if (right) cy - r[1] * tw else cy
         val trx = tlx + r[0] * tw; val tr_y = tly + r[1] * tw

@@ -293,9 +293,10 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
         val pvL = if (landscape) band else 0; val pvT = if (landscape) 0 else band
         val pvW = if (landscape) minOf((sh * ratio).toInt(), sw - band) else sw
         val pvH = if (landscape) sh else minOf((sw * ratio).toInt(), sh - band)
-        // poziomo przy 16:9 prawy brzeg obrazu leży pod przyciskami – wtedy odliczanie pokazujemy osobno, obok nich
+        // odliczanie wpalone jest odsunięte od prawego brzegu o 9% szerokości (nie chowa się pod przyciskami zoomu);
+        // osobne pole pokazujemy tylko, gdy wpalanie jest wyłączone w ustawieniach
         val coverR = if (landscape) maxOf(0, pvL + pvW - (sw - dp(96) - dp(118))) else 0
-        lmBurned = Prefs.watermark && coverR == 0
+        lmBurned = Prefs.watermark
         val mn = minOf(pvW, pvH); val mPx = (mn * 0.02f).toInt()
         val mono = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
         lmIdle = LinearLayout(this).apply {
@@ -329,7 +330,7 @@ class CoachActivity : AppCompatActivity(), Engine.Ui {
             addView(lmRow, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         }
         val lmOver = FrameLayout(this)
-        lmOver.addView(lmBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = mPx; rightMargin = mPx + coverR })
+        lmOver.addView(lmBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = mPx; rightMargin = if (lmBurned) (pvW * 0.09f).toInt() else mPx + coverR })
         root.addView(lmOver, FrameLayout.LayoutParams(pvW, pvH).apply { leftMargin = pvL; topMargin = pvT })
 
         // ---- zoom i przyciski ----

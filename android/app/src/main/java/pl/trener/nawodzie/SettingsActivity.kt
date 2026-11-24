@@ -67,6 +67,7 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             img.list("quality", "Jakość nagrania", arrayOf("HD 720p (~45 MB/min)", "Full HD 1080p (~105 MB/min)", "4K (~300 MB/min)"), arrayOf("HD", "FHD", "UHD"), "FHD")
             img.list("aspect", "Proporcje obrazu", arrayOf("4:3", "16:9 (panoramiczne)"), arrayOf("4:3", "16:9"), "4:3")
             img.sw("watermark", "Czas GPS i odliczanie na nagraniu", "Czas każdej klatki (z GPS, co do milisekundy) w lewym górnym rogu i odliczanie ostatniej minuty w prawym – do synchronizacji z GPX.", true)
+            img.sw("mp4_meta", "Czas także w pliku MP4 (eksperyment)", "Zapisuje czas pierwszej klatki w nagłówku MP4 i dopisuje blok z JSON na końcu pliku. Plik JSON obok filmu powstaje zawsze. Włącz tylko do prób – część odtwarzaczy może go źle odczytać.", false)
             stabPref = img.list("stab_mode", "Stabilizacja obrazu",
                 arrayOf("OIS – optyczna (obiektyw)", "EIS – elektroniczna systemowa", "SUPER – jak Super Steady", "SUPER+H – Super + poziomy horyzont"),
                 arrayOf("off", "eis", "super", "superh"), Prefs.stabMode)

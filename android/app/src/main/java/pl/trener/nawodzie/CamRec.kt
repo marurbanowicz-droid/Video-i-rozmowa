@@ -359,7 +359,8 @@ object CamRec {
             LastMinute.text(utc)?.let { cd ->
                 if (cd != ovCdLast) { st.drawCountdown(cd); ovCdLast = cd }
                 th = mn * 0.085f
-                ovRect.set(uw - m - th * st.cdAspect, m, uw - m, m + th)
+                val rm = maxOf(m, uw * 0.09f)   // jak w StabEffect: odsunięte od prawego brzegu o 9% szerokości
+                ovRect.set(uw - rm - th * st.cdAspect, m, uw - rm, m + th)
                 c.drawBitmap(st.cdBmp, null, ovRect, ovPaint)
             }
             c.restore()
@@ -531,7 +532,7 @@ object CamRec {
             val (pts, dur, n) = RecTime.filePts(vFile)
             rt.build(fileName, pts, dur, n)
         } catch (e: Throwable) { Log.w(TAG, "time meta", e) }
-        val stamp: ((java.io.FileDescriptor) -> Unit)? = if (rt != null && rt.firstUtc > 0) { fd -> Mp4Stamp.apply(fd, rt.firstUtc, rt.json) } else null
+        val stamp: ((java.io.FileDescriptor) -> Unit)? = if (rt != null && rt.firstUtc > 0 && Prefs.mp4Meta) { fd -> Mp4Stamp.apply(fd, rt.firstUtc, rt.json) } else null
         val uri: Uri? = try {
             // obraz opóźniony o delayMs – dźwięk przesuwamy o tyle samo
             Muxer.mux(app, vFile, pcm, sr, ch, Prefs.audioOffsetMs + delayMs, started, suffix, stamp)
