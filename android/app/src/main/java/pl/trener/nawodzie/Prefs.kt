@@ -92,6 +92,8 @@ object Prefs {
     // ---------- kamera ----------
     val aspect: String get() = sp.getString("aspect", "4:3") ?: "4:3"
     val watermark get() = sp.getBoolean("watermark", true)
+    /** Czas pierwszej klatki także w samym pliku MP4 (data utworzenia + blok z JSON); domyślnie wyłączone – JSON zawsze leży obok filmu. */
+    val mp4Meta get() = sp.getBoolean("mp4_meta", false)
     /** Korekta jasności pamiętana osobno dla trybów SUPER (obiektyw szeroki jest ciemniejszy) i dla pozostałych. */
     private val evSuper get() = stabMode == "super" || stabMode == "superh"
     var evSuperDefault = 0   // ustawiane przez kamerę: ok. +0,7 EV
